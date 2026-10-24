@@ -46,6 +46,7 @@ workflow (ensemble_io, synthetic_ensemble).
 
 from __future__ import annotations
 
+import os
 import numpy as np
 from scipy.stats import skew, kurtosis
 from joblib import Parallel, delayed
@@ -66,12 +67,20 @@ _OFF = np.array([(k // 9, (k // 3) % 3, k % 3) for k in range(27)], dtype=np.int
 # ---------------------------------------------------------------------------
 # Encoder
 # ---------------------------------------------------------------------------
-def orthogonal_projection(input_dim, output_dim, seed):
-    """Column-orthonormal projection (input_dim, output_dim): QR of a standard normal matrix, as in the notebook."""
+def orthogonal_projection(input_dim, output_dim, seed, chunk_rows=65536):
+    """
+    Column-orthonormal projection (input_dim, output_dim): QR of a standard normal matrix, as in the notebook.
+    The normal matrix is drawn by blocks of rows directly into float32 (the same numbers as one float64 draw
+    cast to float32, without the float64 copy), which halves the transient memory for large input_dim.
+    """
     assert output_dim <= input_dim, (input_dim, output_dim)
     rng = np.random.default_rng(seed)
-    W = rng.standard_normal((input_dim, output_dim)).astype(np.float32)
+    W = np.empty((input_dim, output_dim), dtype=np.float32)
+    for i0 in range(0, input_dim, chunk_rows):
+        i1 = min(i0 + chunk_rows, input_dim)
+        W[i0:i1] = rng.standard_normal((i1 - i0, output_dim))
     Q, _ = np.linalg.qr(W)
+    del W
     return np.ascontiguousarray(Q, dtype=np.float32)
 
 
@@ -90,25 +99,29 @@ def _pool(x, op):
     return v * np.float32(0.125) if op is np.add else v
 
 
-def _difference_block(x):
+def _difference_block(x, chunk=27):
     """
     One block of the encoder. x: (C, nz, ny, nx) float32, C = 1 (block 1) or N_KERNELS (depthwise blocks).
     Returns (N_KERNELS, nz//2, ny//2, nx//2): |shift_i(x_c) - shift_j(x_c)| / sqrt(2), max-pooled 2x2x2.
+    The kernels are processed by groups of `chunk` and each group is pooled at once, so that the full-resolution
+    response of all 351 kernels (110 MB for a 36 x 42 x 52 grid) is never held in memory.
     """
     c, nz, ny, nx = x.shape
     xp = np.pad(x, ((0, 0), (1, 1), (1, 1), (1, 1)))                  # zero padding = Keras 'same'
-    a = np.empty((N_KERNELS, nz, ny, nx), dtype=np.float32)            # shift_i(x_c) for each kernel c
-    b = np.empty_like(a)                                               # shift_j(x_c)
-    for k, (oz, oy, ox) in enumerate(_OFF):                            # 27 contiguous slices instead of a gather
-        view = xp[:, oz:oz + nz, oy:oy + ny, ox:ox + nx]
-        for arr, col in ((a, 0), (b, 1)):
-            sel = np.flatnonzero(PAIRS[:, col] == k)                   # kernels whose +/- voxel is offset k
-            if sel.size:
-                arr[sel] = view[0] if c == 1 else view[sel]
-    np.subtract(a, b, out=a)
-    np.abs(a, out=a)
-    a *= _SCALE
-    return _pool(a, np.maximum)
+    out = np.empty((N_KERNELS, nz // 2, ny // 2, nx // 2), dtype=np.float32)
+    tmp = np.empty((chunk, nz, ny, nx), dtype=np.float32)
+    for k0 in range(0, N_KERNELS, chunk):
+        k1 = min(k0 + chunk, N_KERNELS)
+        for j, k in enumerate(range(k0, k1)):
+            (pz, py, px), (qz, qy, qx) = _OFF[PAIRS[k, 0]], _OFF[PAIRS[k, 1]]
+            ch = 0 if c == 1 else k                                    # depthwise: kernel k on channel k
+            np.subtract(xp[ch, pz:pz + nz, py:py + ny, px:px + nx], xp[ch, qz:qz + nz, qy:qy + ny, qx:qx + nx],
+                        out=tmp[j])
+        t = tmp[:k1 - k0]
+        np.abs(t, out=t)
+        t *= _SCALE
+        out[k0:k1] = _pool(t, np.maximum)
+    return out
 
 
 def pooled_descriptors(model_01):
@@ -133,6 +146,17 @@ def pooled_dims(shape):
         s = s // 2                        # max pooling of the block
         dims.append(int(np.prod(s // 2)) * N_KERNELS)   # average pooling, times the channels
     return tuple(dims)
+
+
+def _batch_of(models_4d, i0, i1):
+    """Models i0..i1-1 of an (nz, ny, nx, N) ensemble as a contiguous (n, nz, ny, nx) float32 array."""
+    return np.ascontiguousarray(np.moveaxis(models_4d[..., i0:i1], -1, 0), dtype=np.float32)
+
+
+def _pooled_batch(batch, vmin, scale):
+    """Pooled descriptors of a batch of models (n, nz, ny, nx), stacked by branch."""
+    P = [pooled_descriptors((m - vmin) * scale) for m in batch]
+    return tuple(np.stack([p[k] for p in P]) for k in range(3))
 
 
 class DiffNetEncoder:
@@ -189,14 +213,19 @@ class DiffNetEncoder:
         vmax = float(models_4d.max()) if vmax is None else float(vmax)
         scale = 1.0 / (vmax - vmin) if vmax > vmin else 1.0
 
-        def _batch(i0, i1):
-            P = [pooled_descriptors((models_4d[..., i] - vmin) * scale) for i in range(i0, i1)]
-            return tuple(np.stack([p[k] for p in P]) for k in range(3))
-
         bounds = [(i, min(i + batch, n)) for i in range(0, n, batch)]
         out = np.empty((n, self.latent_dim), dtype=np.float32)
-        for (i0, i1), P in zip(bounds, Parallel(n_jobs=n_jobs, verbose=verbose)(delayed(_batch)(*b) for b in bounds)):
-            out[i0:i1] = self.project(P)
+        # Each task receives only its own batch of models (model axis first, contiguous). The pooled
+        # descriptors (about 1.8 MB per model for a 36 x 42 x 52 grid) are projected group by group as the
+        # workers return them, so that memory does not grow with the number of models.
+        with Parallel(n_jobs=n_jobs, verbose=verbose, max_nbytes=None) as parallel:   # no memmapping of the batches
+            group = 4 * max(parallel.n_jobs if parallel.n_jobs > 0 else os.cpu_count() or 1, 1)
+            for g in range(0, len(bounds), group):
+                part = bounds[g:g + group]
+                res = parallel(delayed(_pooled_batch)(_batch_of(models_4d, i0, i1), vmin, scale) for i0, i1 in part)
+                for (i0, i1), P in zip(part, res):
+                    out[i0:i1] = self.project(P)
+                del res
         return out
 
 
@@ -209,15 +238,18 @@ def compute_density_features(model):
     return np.array([v.mean(), v.std(), skew(v), kurtosis(v), v.max() - v.min()], dtype=np.float32)
 
 
-def topo_and_density_features(models_4d, n_jobs=-1, verbose=0):
+def _topo_dens_batch(batch):
+    """Topological and density features of a batch of models (n, nz, ny, nx)."""
+    return [(compute_topo_features(m), compute_density_features(m)) for m in batch]
+
+
+def topo_and_density_features(models_4d, n_jobs=-1, verbose=0, batch=50):
     """Topological (N, 6) and density (N, 5) features of an ensemble (nz, ny, nx, N), on the raw label field."""
     n = models_4d.shape[3]
-
-    def _one(i):
-        m = np.ascontiguousarray(models_4d[..., i])
-        return compute_topo_features(m), compute_density_features(m)
-
-    res = Parallel(n_jobs=n_jobs, verbose=verbose)(delayed(_one)(i) for i in range(n))
+    bounds = [(i, min(i + batch, n)) for i in range(0, n, batch)]
+    res = Parallel(n_jobs=n_jobs, verbose=verbose, max_nbytes=None)(       # batches pickled, not memmapped
+        delayed(_topo_dens_batch)(_batch_of(models_4d, i0, i1)) for i0, i1 in bounds)
+    res = [r for part in res for r in part]
     topo = np.stack([r[0] for r in res])
     dens = np.stack([r[1] for r in res])
     return topo, dens

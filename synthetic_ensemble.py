@@ -205,51 +205,74 @@ def sample_model(rng, params, shape=(36, 54, 64), padd=6, z_cover=6, z_base=16, 
     return (m, lab) if return_labels else m
 
 
+def _allocate(shape, padd, n, crop_padding, return_labels):
+    """Output arrays filled model by model (no list of models, no np.stack: the peak memory is the output itself)."""
+    nz, ny, nx = shape
+    p = padd if crop_padding else 0
+    out_shape = (nz, ny - 2 * p, nx - 2 * p, n)
+    models = np.empty(out_shape, dtype=np.float32)
+    labs = np.empty(out_shape, dtype=np.int8) if return_labels else None
+    sl = (slice(None), slice(p, ny - p), slice(p, nx - p))
+    return models, labs, sl
+
+
 def make_ensemble(n_per_chain=400, shape=(36, 54, 64), padd=6, seed=0, chains=CHAINS, density_sd=10.0,
-                  geometry=None, return_truth=False, return_labels=False):
+                  geometry=None, return_truth=False, return_labels=False, crop_padding=False):
     """
     Returns
     -------
-    models_4d : (nz, ny, nx, N) float32
+    models_4d : (nz, ny, nx, N) float32; with crop_padding=True, the lateral padding (padd cells on each
+                side) is dropped as each model is generated: (nz, ny - 2 padd, nx - 2 padd, N), the `core`
+                of the notebooks, at 60 % of the memory for the default shape
     chain_id  : (N,) str
     misfit    : (N,) float, a fake data misfit (lower = better)
     truth     : pandas DataFrame of the drawn geometry, one row per model (only if return_truth)
     labels    : (nz, ny, nx, N) int8 unit codes (CODES) before the isolated cells (only if return_labels)
+
+    Memory: N x nz x ny x nx x 4 bytes, e.g. 14.9 GB for 30 000 models of 36 x 54 x 64 cells (9.4 GB cropped).
+    The models are drawn in the same order from the same random stream whatever crop_padding, so the
+    ensemble is identical to the uncropped one restricted to the core.
     """
     rng = np.random.default_rng(seed)
-    models, chain_id, misfit, rows, labs = [], [], [], [], []
+    n = n_per_chain * len(chains)
+    models, labs, sl = _allocate(shape, padd, n, crop_padding, return_labels)
+    chain_id, misfit, rows = [], [], []
+    k = 0
     for name, params in chains.items():
         for _ in range(n_per_chain):
             info = {}
             m, lab = sample_model(rng, params, shape, padd, density_sd=density_sd, geometry=geometry,
                                   truth=info, return_labels=True)
-            models.append(m); chain_id.append(name); rows.append(info)
+            models[..., k] = m[sl]
             if return_labels:
-                labs.append(lab)
+                labs[..., k] = lab[sl]
+            chain_id.append(name); rows.append(info)
             # fake misfit: dykes and pipes "fit" slightly worse; purely illustrative
             misfit.append(abs(rng.normal(1.0, 0.3)) + 0.4 * info['dyke'] + 0.2 * info['pipe'])
-    out = (np.stack(models, -1), np.array(chain_id), np.array(misfit))
+            k += 1
+    out = (models, np.array(chain_id), np.array(misfit))
     if return_truth:
         import pandas as pd
         out = out + (pd.DataFrame(rows),)
     if return_labels:
-        out = out + (np.stack(labs, -1),)
+        out = out + (labs,)
     return out
 
 
 def make_prior_ensemble(n=400, shape=(36, 54, 64), padd=6, seed=1, density_sd=10.0, geometry=None,
-                        return_truth=False, return_labels=False):
+                        return_truth=False, return_labels=False, crop_padding=False):
     """Prior ensemble (PRIOR rates). Returns the models, then the truth table and labels if asked, as make_ensemble."""
     rng = np.random.default_rng(seed)
-    models, rows, labs = [], [], []
-    for _ in range(n):
+    models, labs, sl = _allocate(shape, padd, n, crop_padding, return_labels)
+    rows = []
+    for k in range(n):
         info = {}
         m, lab = sample_model(rng, PRIOR, shape, padd, density_sd=density_sd, geometry=geometry,
                               truth=info, return_labels=True)
-        models.append(m); rows.append(info)
+        models[..., k] = m[sl]
         if return_labels:
-            labs.append(lab)
-    models = np.stack(models, -1)
+            labs[..., k] = lab[sl]
+        rows.append(info)
     if not (return_truth or return_labels):
         return models
     out = (models,)
@@ -257,5 +280,5 @@ def make_prior_ensemble(n=400, shape=(36, 54, 64), padd=6, seed=1, density_sd=10
         import pandas as pd
         out = out + (pd.DataFrame(rows),)
     if return_labels:
-        out = out + (np.stack(labs, -1),)
+        out = out + (labs,)
     return out

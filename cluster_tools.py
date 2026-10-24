@@ -19,6 +19,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 from sklearn.cluster import DBSCAN, HDBSCAN
 from sklearn.neighbors import NearestNeighbors
 
@@ -67,11 +68,22 @@ def cluster_ids_by_size(labels, min_size=1):
 # ---------------------------------------------------------------------------
 # Cluster statistics
 # ---------------------------------------------------------------------------
-def cluster_stats(core, labels, cl):
-    """Median model, standard-deviation model and member indices of cluster cl. Returns (median, std, idx)."""
+def cluster_stats(core, labels, cl, median=True):
+    """
+    Median model, standard-deviation model and member indices of cluster cl. Returns (median, std, idx);
+    median is None with median=False. The members are gathered one depth slice at a time, so that a large
+    cluster is never copied as a whole (the extra memory is that of one slice of all its members).
+    """
     idx = np.flatnonzero(labels == cl)
-    members = core[..., idx].astype(np.float32)
-    return np.median(members, axis=3), members.std(axis=3), idx
+    nz = core.shape[0]
+    med = np.empty(core.shape[:3], dtype=np.float32) if median else None
+    std = np.empty(core.shape[:3], dtype=np.float32)
+    for z in range(nz):
+        members = core[z][..., idx].astype(np.float32)          # (ny, nx, n)
+        std[z] = members.std(axis=-1)
+        if median:
+            med[z] = np.median(members, axis=-1)
+    return med, std, idx
 
 
 def representative_index(coords, labels, cl):
@@ -107,7 +119,7 @@ def cluster_table(core, coords, labels, chain_id=None, truth=None, truth_cols=('
         row = {'cluster': cl, 'n': len(idx)}
         for c in chains:
             row[f'frac_{c}'] = float(np.mean(chain_id[idx] == c))
-        row['mean_voxel_std'] = float(core[..., idx].astype(np.float32).std(axis=3).mean())
+        row['mean_voxel_std'] = float(cluster_stats(core, labels, cl, median=False)[1].mean())
         row['representative'] = representative_index(coords, labels, cl)
         if truth is not None:
             for col in truth_cols:
@@ -132,6 +144,41 @@ def truth_enrichment(truth, labels, cols=('high', 'lens', 'dyke', 'pipe'), min_s
     enr = pd.DataFrame(rows).T
     enr.index.name = 'cluster'
     return enr
+
+
+def topology_classes(keys):
+    """
+    Class number of each model's topology key (1 = most frequent class of the ensemble, 2 = next, ...),
+    numbered as in motif_analysis.topology_census (decreasing frequency, ties in order of first occurrence).
+    Returns (class number per model (N,), number of models per class, indexed by class number - 1).
+    """
+    arr = np.empty(len(keys), dtype=object)
+    for i, k in enumerate(keys):                       # element-wise: keys are nested tuples
+        arr[i] = k
+    codes, _ = pd.factorize(arr)
+    n = np.bincount(codes)
+    order = np.argsort(-n, kind='stable')
+    number = np.empty(len(n), dtype=int)
+    number[order] = np.arange(1, len(n) + 1)
+    return number[codes], n[order]
+
+
+def cluster_topology(classes, labels, min_size=1):
+    """
+    Per cluster (sorted by size): most frequent topology class, its share in the cluster and in the ensemble,
+    and the number of distinct classes in the cluster. `classes` from topology_classes.
+    """
+    classes = np.asarray(classes)
+    N = len(classes)
+    p_all = np.bincount(classes) / N
+    rows = []
+    for cl in cluster_ids_by_size(labels, min_size):
+        c = classes[labels == cl]
+        cnt = np.bincount(c)
+        mode = int(cnt.argmax())
+        rows.append({'cluster': cl, 'n': len(c), 'topology_class': mode, 'share_in_cluster': cnt[mode] / len(c),
+                     'share_in_ensemble': p_all[mode], 'n_classes': int((cnt > 0).sum())})
+    return pd.DataFrame(rows).set_index('cluster')
 
 
 # ---------------------------------------------------------------------------
@@ -182,16 +229,49 @@ def plot_kdist(coords, k=5, eps=None, ax=None):
     return ax
 
 
+def _edges(centres):
+    """Cell edges from cell-centre coordinates (half a cell beyond the first and last centres)."""
+    c = np.asarray(centres, dtype=float)
+    if c.size == 1:
+        return np.array([c[0] - 0.5, c[0] + 0.5])
+    mid = 0.5 * (c[:-1] + c[1:])
+    return np.concatenate([[2 * c[0] - mid[0]], mid, [2 * c[-1] - mid[-1]]])
+
+
+def section_extent(orient, shape, axis_coords=None):
+    """
+    imshow extent (left, right, bottom, top) of a section of a (nz, ny, nx) grid, and the names of its horizontal
+    and vertical axes. axis_coords: None (cell indices) or dict with the cell-centre coordinates along the axes of
+    the grid, keys 'z' (depth, index 0 = top), 'y', 'x'; missing keys fall back to cell indices.
+    """
+    nz, ny, nx = shape
+    n = {'z': nz, 'y': ny, 'x': nx}
+    hk, vk = {'y': ('x', 'z'), 'x': ('y', 'z'), 'z': ('x', 'y')}[orient]
+    e = {k: _edges(axis_coords[k]) if axis_coords is not None and k in axis_coords else np.arange(n[k] + 1) - 0.5
+         for k in (hk, vk)}
+    for k in (hk, vk):
+        assert len(e[k]) == n[k] + 1, f"axis_coords['{k}'] has {len(e[k]) - 1} values, the grid {n[k]} cells along {k}"
+    if orient == 'z':                                  # map view, drawn with origin='lower'
+        extent = (e[hk][0], e[hk][-1], e[vk][0], e[vk][-1])
+    else:                                              # vertical section, origin='upper': depth index 0 at the top
+        extent = (e[hk][0], e[hk][-1], e[vk][-1], e[vk][0])
+    return extent, hk, ('depth' if vk == 'z' else vk)
+
+
 def plot_cluster_tiles(core, labels, orient='y', iy=None, ix=None, iz=None, stat='median', min_size=5,
-                       max_tiles=36, vmin=None, vmax=None, cmap='viridis', tile_w=2.2):
+                       max_tiles=36, vmin=None, vmax=None, cmap='viridis', tile_w=2.2, axis_coords=None,
+                       units='cell'):
     """
     Tile view: one section per cluster (median or std model), clusters sorted by size, as in test_notebook3.
+    Each tile shows its coordinates (tick values); the axis names are given on the left column and the bottom row.
+    axis_coords: None for cell indices, or dict of cell-centre coordinates along the axes of core ('z', 'y', 'x'),
+    e.g. in metres, with `units` their unit; the tiles keep the proportions of the grid in cells.
     Returns the figure.
     """
     ids = cluster_ids_by_size(labels, min_size)[:max_tiles]
     panels, ns = [], []
     for cl in ids:
-        med, std, idx = cluster_stats(core, labels, cl)
+        med, std, idx = cluster_stats(core, labels, cl, median=(stat == 'median'))
         panels.append(section(med if stat == 'median' else std, orient, iy, ix, iz))
         ns.append(len(idx))
     if not panels:
@@ -204,15 +284,23 @@ def plot_cluster_tiles(core, labels, orient='y', iy=None, ix=None, iz=None, stat
         vmin = min(p.min() for p in panels)
     if vmax is None:
         vmax = max(p.max() for p in panels)
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(tile_w * n_cols, tile_w * h / w * n_rows + 0.3 * n_rows),
+    extent, hname, vname = section_extent(orient, core.shape[:3], axis_coords)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(tile_w * n_cols, tile_w * h / w * n_rows + 0.45 * n_rows),
                              squeeze=False, constrained_layout=True)
     for ax in axes.flat:
         ax.axis('off')
-    for ax, p, cl, k in zip(axes.flat, panels, ids, ns):
+    for k, (ax, p, cl, m) in enumerate(zip(axes.flat, panels, ids, ns)):
+        ax.axis('on')
         ax.imshow(p, cmap=cmap, vmin=vmin, vmax=vmax, origin='upper' if orient != 'z' else 'lower',
-                  aspect='equal', interpolation='nearest')
-        ax.set_title(f'cluster {cl} (n={k})', fontsize=8)
-        ax.axis('on'); ax.set_xticks([]); ax.set_yticks([])
+                  extent=extent, aspect='equal' if axis_coords is None else 'auto', interpolation='nearest')
+        ax.set_title(f'cluster {cl} (n={m})', fontsize=8)
+        ax.tick_params(labelsize=6, length=2, pad=1)
+        ax.xaxis.set_major_locator(MaxNLocator(4)); ax.yaxis.set_major_locator(MaxNLocator(4))
+        r, c = divmod(k, n_cols)
+        if c == 0:
+            ax.set_ylabel(f'{vname} ({units})', fontsize=7)
+        if k + n_cols >= n:                              # lowest tile of its column
+            ax.set_xlabel(f'{hname} ({units})', fontsize=7)
     where = {'y': f'section y = {iy}', 'x': f'section x = {ix}', 'z': f'map z = {iz}'}[orient]
     fig.suptitle(f'{stat} model per cluster, {where}', fontsize=11)
     return fig
