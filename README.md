@@ -1,13 +1,13 @@
 # PostTopo
 
-Posterior ensemble analysis: notebooks and code for the short course *Probabilistic geometrical inversion: from model sampling to geological assessment* (ASEG Discover 2026).
+Posterior ensemble analysis: notebooks and code for the short course *Probabilistic geometrical inversion: from model sampling to (geological) assessment* (ASEG Discover 2026).
 
 The notebooks cluster an ensemble of posterior models and interpret the clusters with geometrical and topological motifs. Each model is described by a feature vector (encoder values, topological scalars and density moments), embedded with UMAP (Uniform Manifold Approximation and Projection; McInnes et al., 2018) and clustered with DBSCAN (Density-Based Spatial Clustering of Applications with Noise; Ester et al., 1996).
 
 | Notebook | Ensemble | Open in Colab |
 |---|---|---|
-| `cluster_workflow_synthetic.ipynb` | Synthetic ensemble (3 chains), geometry known model by model | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jgeomos/PostTopo/blob/main/cluster_workflow_synthetic.ipynb) |
-| `cluster_workflow_field.ipynb` | Boulia field ensemble (5 chains, trans-dimensional inversion) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jgeomos/PostTopo/blob/main/cluster_workflow_field.ipynb) |
+| `cluster_workflow_synthetic.ipynb` | Synthetic ensemble, geometry known model by model | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jgeomos/PostTopo/blob/main/cluster_workflow_synthetic.ipynb) |
+| `cluster_workflow_field.ipynb` | Boulia field ensemble (different (pseudo)trans-dimensional inversion chains) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jgeomos/PostTopo/blob/main/cluster_workflow_field.ipynb) |
 
 # Running the examples
 
@@ -42,8 +42,3 @@ The notebooks must be launched from the repository root so that `modules/` and `
 - `modules/`: Python modules used by the notebooks (synthetic ensemble generator, feature extraction, clustering, interactive viewer, motif analysis and plotting).
 - `data/`: Boulia ensemble (2000 post-burn-in models from five chains), prior model and topology.
 - `*_cluster_viewer_*.html`: pre-computed interactive cluster viewers, to be opened in a web browser.
-
-## References
-
-- Ester, M., Kriegel, H.-P., Sander, J. & Xu, X., 1996. A density-based algorithm for discovering clusters in large spatial databases with noise, in *Proceedings of the 2nd International Conference on Knowledge Discovery and Data Mining (KDD-96)*, pp. 226–231, AAAI Press.
-- McInnes, L., Healy, J. & Melville, J., 2018. UMAP: Uniform Manifold Approximation and Projection for dimension reduction, *arXiv preprint*, arXiv:1802.03426.
