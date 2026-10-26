@@ -67,7 +67,8 @@ window          body of a `deep_units` unit whose faces directly below a
                 `top_units` unit plus its faces on the model top number
                 >= amin_window                             [basement breach of the cover]
 order_violation edge where the majority above/below sense contradicts the
-                stratigraphic order `order`
+                stratigraphic order `order`, over at least amin_violation
+                inverted faces
 fragment        body dropped by the volume floor           [sampler noise, not a motif]
 
 chimney and dyke ask only what their reading states: contacts and the shape
@@ -193,6 +194,7 @@ DEFAULTS = dict(
     trap_frac=0.5,         # host fraction of both the top and bottom faces of a trapped body (vertical_trap)
     amin_window=None,      # minimum basement-under-cover faces for a window (None: vmin_voxels)
     amin_link=1,           # minimum faces of a chimney against each of the deep and top units (1: any contact)
+    amin_violation=1,      # minimum inverted faces of an order violation (1: any inverted contact)
     cross_units=2,         # minimum number of distinct units in lateral contact with a cross-cutting body or dyke
     bridge_parts=2,        # minimum number of face-reaching compartments left when a bridge is removed
     bridge_ratio=1.0,      # each compartment has at least this times the volume of the bridge
@@ -602,7 +604,8 @@ def motif_flags(G, deep_units=(), top_units=(), order=None, thr=None, amin=1):
             if over_u == over_v:
                 continue
             upper, lower = (u, v) if over_u > over_v else (v, u)
-            if rank[G.nodes[upper]['unit']] > rank[G.nodes[lower]['unit']]:
+            if (rank[G.nodes[upper]['unit']] > rank[G.nodes[lower]['unit']]
+                    and max(over_u, over_v) >= p['amin_violation']):        # inverted faces: deeper unit on top
                 n_viol += 1
                 flags[upper].add('order_violation'); flags[lower].add('order_violation')
                 for b in (upper, lower):
@@ -654,7 +657,8 @@ def motif_score(G, n, motif):
     k_oblate / 10 (sheets); |e1.z| = 1 or |e3.z| = 0; f_side = 0; F_b = 1;
     A_b = layer_aspect / 3; f_bottom = 0; f_up = f_down = 1; 2 more lateral units than
     cross_units; compartments 100 times the bridge volume; window and violating
-    contacts of 100 times the minimum area; contacts of a chimney with the deep
+    contacts of 100 times the minimum area (violations: the larger of vmin_voxels
+    and amin_violation); contacts of a chimney with the deep
     and top units of 100 times amin_link. Criteria without a threshold (contact
     fractions f_up, f_down, host fraction) enter as their value.
 
@@ -694,7 +698,7 @@ def motif_score(G, n, motif):
     elif motif == 'window':
         c = {'window area': _logm(a['window_faces'], G.graph['amin_window'], 2.0)}
     elif motif == 'order_violation':
-        c = {'violating contact': _logm(a['viol_faces'], G.graph['vmin_voxels'], 2.0)}
+        c = {'violating contact': _logm(a['viol_faces'], max(G.graph['vmin_voxels'], p['amin_violation']), 2.0)}
     else:
         raise KeyError(motif)
     return (min(c.values()) if c else np.nan), c
