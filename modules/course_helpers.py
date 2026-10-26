@@ -257,14 +257,121 @@ def cluster(coords, method='dbscan', eps=0.25, min_samples=5, min_cluster_size=1
 # ---------------------------------------------------------------------------
 # Cluster statistics and viewer
 # ---------------------------------------------------------------------------
+def structure_profile(model, orient='y', tol=None):
+    """
+    Amount of lateral structure in each section of a 3D model along `orient`: number of cells whose value differs
+    from the median of their depth slice by more than tol (default: 10 % of the range of the model). Flat layers
+    give 0; bodies, highs and lateral contacts give positive counts. Returns an array over the section indices.
+    """
+    m = np.asarray(model, dtype=np.float32)
+    tol = 0.1 * float(m.max() - m.min()) if tol is None else tol
+    anomalous = np.abs(m - np.median(m.reshape(m.shape[0], -1), axis=1)[:, None, None]) > tol
+    return anomalous.sum(axis={'y': (0, 2), 'x': (0, 1), 'z': (1, 2)}[orient])
+
+
+def diverse_clusters(core, labels, ids, n, meds=None):
+    """
+    Greedy choice of n clusters among `ids` whose median models differ most: starting from the first id (the
+    largest cluster), the cluster whose median model is furthest from all those already chosen is added at each
+    step. Distance: mean absolute difference of two median models over all cells (density units).
+    Returns (chosen ids, distance of each to the nearest previously chosen, nan for the first).
+    """
+    meds = {cl: ct.cluster_stats(core, labels, cl)[0] for cl in ids} if meds is None else meds
+    chosen, dist = [ids[0]], [np.nan]
+    nearest = {cl: np.inf for cl in ids}
+    while len(chosen) < min(n, len(ids)):
+        last = meds[chosen[-1]]
+        for cl in ids:
+            if cl not in chosen:
+                nearest[cl] = min(nearest[cl], float(np.abs(meds[cl] - last).mean()))
+        cl = max((c for c in ids if c not in chosen), key=nearest.get)
+        chosen.append(cl)
+        dist.append(nearest[cl])
+    return chosen, dist
+
+
 def plot_tiles(core, labels, orient='y', index=None, min_size=5, vmin=None, vmax=None, max_tiles=30,
-               axis_coords=None, units='cell'):
-    """Median model, then standard-deviation model, of every cluster on one section (cluster_tools.plot_cluster_tiles)."""
+               axis_coords=None, units='cell', tol=None, select='size', clusters=None, tile_w=2.2):
+    """
+    Median model, then standard-deviation model, of clusters of at least min_size models, one tile per cluster.
+
+    index : section index along `orient` (centre if None), or 'best': each cluster on its own section, the one
+        where its median model has most lateral structure (structure_profile, tolerance tol, by default 10 % of
+        vmax - vmin).
+    select : 'size' (the max_tiles largest clusters) or 'diverse' (max_tiles clusters whose median models differ
+        most, diverse_clusters; the distance to the nearest cluster already chosen is given in the titles).
+    clusters : explicit list of cluster ids, in the order shown (overrides select).
+    With index='best' or select='diverse', the full median model of each cluster is computed, which takes longer.
+    """
     at = {'y': 'iy', 'x': 'ix', 'z': 'iz'}[orient]
-    for stat, lo, hi, cmap in (('median', vmin, vmax, 'viridis'), ('std', 0, None, 'magma')):
-        ct.plot_cluster_tiles(core, labels, orient=orient, stat=stat, min_size=min_size, max_tiles=max_tiles,
-                              vmin=lo, vmax=hi, cmap=cmap, axis_coords=axis_coords, units=units, **{at: index})
+    ids = ct.cluster_ids_by_size(labels, min_size)
+    if clusters is not None:
+        unknown = [c for c in clusters if c not in set(np.unique(labels))]
+        if unknown:
+            raise ValueError(f"no cluster {unknown}; clusters by size: {ids}")
+        ids = list(clusters)
+    if not ids:
+        raise ValueError('no cluster with at least min_size models')
+    full = (isinstance(index, str) and index == 'best') or (select == 'diverse' and clusters is None)
+    stats = {cl: ct.cluster_stats(core, labels, cl) for cl in ids} if full else {}
+    dist = {}
+    if clusters is None:
+        if select == 'diverse':
+            chosen, d = diverse_clusters(core, labels, ids, max_tiles, meds={cl: v[0] for cl, v in stats.items()})
+            ids, dist = chosen, dict(zip(chosen, d))
+        elif select == 'size':
+            ids = ids[:max_tiles]
+        else:
+            raise ValueError(f"select must be 'size' or 'diverse', not {select!r}")
+    tol = 0.1 * (vmax - vmin) if tol is None and vmin is not None and vmax is not None else tol
+    stack = None if full else ct.section_stack(core, orient, **{at: index})
+    tiles = []
+    for cl in ids:
+        if full:
+            med, std, idx = stats[cl]
+            if isinstance(index, str):
+                prof = structure_profile(med, orient, tol)
+                k = int(np.argmax(prof)) if prof.max() > 0 else len(prof) // 2    # no structure: middle section
+            else:
+                k = core.shape[{'z': 0, 'y': 1, 'x': 2}[orient]] // 2 if index is None else index
+            med_s, std_s = ct.section(med, orient, **{at: k}), ct.section(std, orient, **{at: k})
+        else:
+            med_s, std_s, idx = ct.section_stats(stack, labels, cl)
+            k = core.shape[{'z': 0, 'y': 1, 'x': 2}[orient]] // 2 if index is None else index
+        tiles.append((cl, len(idx), k, med_s, std_s))
+    h, w = tiles[0][3].shape
+    n = len(tiles)
+    n_cols = int(np.ceil(np.sqrt(n * w / h))) if n > 1 else 1
+    n_rows = int(np.ceil(n / n_cols))
+    extent, hname, vname = ct.section_extent(orient, core.shape[:3], axis_coords)
+    vmax_std = max(float(t[4].max()) for t in tiles) or 1.0
+    which = {'size': 'largest clusters', 'diverse': 'most different clusters'}[select] if clusters is None \
+        else 'selected clusters'
+    where = 'each on its section with most structure' if isinstance(index, str) else f'section {orient} = {tiles[0][2]}'
+    for j, (stat, cmap, lo, hi) in enumerate((('median', 'viridis', vmin, vmax), ('std', 'magma', 0, vmax_std))):
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(tile_w * n_cols, tile_w * h / w * n_rows + 0.45 * n_rows),
+                                 squeeze=False, constrained_layout=True)
+        for ax in axes.flat:
+            ax.axis('off')
+        for t, (ax, (cl, nm, k, med_s, std_s)) in enumerate(zip(axes.flat, tiles)):
+            ax.axis('on')
+            ax.imshow(med_s if j == 0 else std_s, cmap=cmap, vmin=lo, vmax=hi, extent=extent,
+                      origin='upper' if orient != 'z' else 'lower',
+                      aspect='equal' if axis_coords is None else 'auto', interpolation='nearest')
+            title = f'cluster {cl} (n={nm})' + (f', {orient} = {k}' if isinstance(index, str) else '')
+            if cl in dist and np.isfinite(dist[cl]):
+                title += f'\nd = {dist[cl]:.0f}'
+            ax.set_title(title, fontsize=8)
+            ax.tick_params(labelsize=6, length=2, pad=1)
+            if t % n_cols == 0:
+                ax.set_ylabel(f'{vname} ({units})', fontsize=7)
+            if t + n_cols >= n:
+                ax.set_xlabel(f'{hname} ({units})', fontsize=7)
+        fig.suptitle(f'{stat} model, {which}\n{where}', fontsize=10)
         plt.show()
+    if dist:
+        print('d: mean absolute difference (density units) between the median model of the cluster and that of the '
+              'nearest cluster shown before it')
 
 
 def plot_largest_clusters(core, coords, labels, n_show=4, iy=None, ix=None, iz=None, min_size=5, vmin=None,
@@ -405,7 +512,7 @@ def _rank_model(model, kw, motifs, i):
             clarity = min(crit.values()) if crit else 0.0
             others = sorted(f - {motif} - COMPATIBLE.get(motif, set()))
             vol = G.nodes[n]['volume']
-            key = (not others, round(clarity, 1), -n_flagged, round(clarity, 2),
+            key = (clarity >= 0.5, not others, round(clarity, 1), -n_flagged, round(clarity, 2),
                    round(float(np.mean(list(crit.values()))), 2) if crit else 0.0,
                    -vol if motif == 'order_violation' else vol)   # a violation flags both bodies: show the smaller,
             #                                                         usually the misplaced one
@@ -418,6 +525,7 @@ def rank_examples(core, df_motifs, kw, motifs, members, n_check=200, n_jobs=-1):
     """
     Clearest realisations of each motif among the selected models (members): for each motif, up to n_check of the
     models carrying it (spread over the selection) are checked, and their bodies ranked by
+      0. clarity of at least 0.5 (a clear body carrying another motif beats a clean one at the threshold),
       1. carrying no other motif than those compatible with the reading (COMPATIBLE),
       2. clarity, to 0.1: smallest margin of the criteria of the typicality score (motif_analysis.motif_score) and of
          the reading (reading_terms), each 0 at the threshold and 1 when fully typical,
@@ -502,11 +610,16 @@ def plot_catalogue(vw, df_motifs, kw, examples, motifs, n_ex, members, where):
     selected models carrying the motif.
     """
     members = np.asarray(members)
+    missing = [m for m in motifs if m not in examples]       # e.g. SHOW_MOTIFS changed after cell 6.2 was run
+    if missing:
+        print(f"ranking the examples of {', '.join(missing)} (not in `examples`)")
+        examples.update(rank_examples(vw.core, df_motifs, kw, missing, members))
     for motif in motifs:
         p = float((df_motifs[motif].to_numpy()[members] > 0).mean())
         ex = examples.get(motif, [])[:n_ex]
         if not ex:
-            print(f"{motif}: P = {p:.3f} in {where}, never occurs")
+            print(f"{motif}: P = {p:.3f} in {where}, " + ("never occurs" if p == 0 else
+                  "but no example among the models checked (re-run cell 6.2 after changing 6.1)"))
             continue
         fig, axes = plt.subplots(len(ex), 2, figsize=(10, 2.3 * len(ex)), squeeze=False,
                                  gridspec_kw=dict(width_ratios=vw.pair_ratios()), constrained_layout=True)
