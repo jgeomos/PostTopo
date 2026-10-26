@@ -431,24 +431,26 @@ def reference(core, prior, padd, min_share=0.01, row=0, check=None):
 
 
 def motifs_per_cluster(df_motifs, labels, motifs, min_size=5, truth=None,
-                       truth_motifs=('enclosed_body', 'dyke', 'chimney', 'window')):
+                       truth_motifs=('enclosed_body', 'dyke', 'chimney', 'window'), enrichment=False):
     """
-    Per cluster (at least min_size models, sorted by size): P(motif | cluster), enrichment E, most frequent topology
-    class; with a truth table, the enrichment of the drawn bodies next to that of the recovered motifs.
-    Returns the topology class of each model (1 = most frequent in the ensemble).
+    Per cluster (at least min_size models, sorted by size): P(motif | cluster) and most frequent topology class;
+    with enrichment=True, also the enrichment E and, with a truth table, the enrichment of the drawn bodies next to
+    that of the recovered motifs (E is also shown in the motif viewer). Returns the topology class of each model
+    (1 = most frequent in the ensemble).
     """
     ids = ct.cluster_ids_by_size(labels, min_size)
     p_cl, enr = ma.cluster_enrichment(df_motifs, labels)
     print("P(motif | cluster):")
     display(p_cl.loc[ids, ['n_models'] + list(motifs)].round(2))
-    print("enrichment E = P(motif | cluster) / P(motif)   (empty: motif absent from the ensemble)")
-    display(enr.loc[ids, list(motifs)].round(2).replace([np.inf, -np.inf], np.nan))
+    if enrichment:
+        print("enrichment E = P(motif | cluster) / P(motif)   (empty: motif absent from the ensemble)")
+        display(enr.loc[ids, list(motifs)].round(2).replace([np.inf, -np.inf], np.nan))
     topo_class, topo_n = ct.topology_classes(df_motifs['topology'].to_numpy())
     N = len(df_motifs)
     print(f"{len(topo_n)} topology classes; the most frequent hold "
           + ", ".join(f"#{k + 1}: {n / N:.0%}" for k, n in enumerate(topo_n[:5])) + " of the models")
     display(ct.cluster_topology(topo_class, labels, min_size).round(2))
-    if truth is not None:
+    if enrichment and truth is not None:
         print("enrichment of the drawn bodies (truth) and of the recovered motifs:")
         display(pd.concat({'drawn': ct.truth_enrichment(truth, labels, min_size=min_size),
                            'recovered': enr.loc[ids, list(truth_motifs)]}, axis=1).round(2))
