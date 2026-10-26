@@ -42,7 +42,8 @@ from bokeh.palettes import Viridis256, Magma256, RdBu11
 from bokeh.plotting import figure
 from bokeh.resources import INLINE
 
-from cluster_tools import cluster_ids_by_size, cluster_stats, representative_index, section, cluster_palette
+from cluster_tools import (cluster_ids_by_size, cluster_stats, representative_index, section, cluster_palette,
+                           section_stack)
 
 _ORIENTS = [('y', 'section at fixed y (x-z)'), ('x', 'section at fixed x (y-z)'), ('z', 'depth map (x-y)')]
 
@@ -144,8 +145,10 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
         for s in ('med', 'std', 'rep'):
             stats[f'{s}_{o}'] = []
     chains = np.unique(chain_id) if chain_id is not None else []
+    stacks = {o: section_stack(core, o, iy, ix, iz) for o, _ in _ORIENTS}   # the three sections of every model
     for cl in ids:
-        med, std, idx = cluster_stats(core, labels, cl)
+        _, std, idx = cluster_stats(core, labels, cl, median=False)   # full std: mean voxel std of the cluster
+        med = {o: np.median(stacks[o][..., idx], axis=-1) for o, _ in _ORIENTS}   # median on the sections only
         i_rep = representative_index(coords, labels, cl)
         rep = core[..., i_rep]
         stats['rep_index'].append(i_rep)
@@ -154,8 +157,8 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
         stats['n'].append(int(len(idx)))
         stats['members'].append([int(i) for i in idx])
         for o, _ in _ORIENTS:
-            for s, m in (('med', med), ('std', std), ('rep', rep)):
-                sec = section(m, o, iy, ix, iz).astype(np.float32)
+            for s, sec in (('med', med[o]), ('std', section(std, o, iy, ix, iz)), ('rep', section(rep, o, iy, ix, iz))):
+                sec = np.asarray(sec, dtype=np.float32)
                 stats[f'{s}_{o}'].append(sec[::-1] if o != 'z' else sec)   # top of the model drawn at the top
         info = [f'<b>Cluster {cl}</b>: {len(idx)} models']
         if chain_id is not None:

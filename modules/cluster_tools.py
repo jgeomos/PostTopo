@@ -105,6 +105,34 @@ def section(model, orient, iy=None, ix=None, iz=None):
     raise ValueError(orient)
 
 
+def section_stack(core, orient, iy=None, ix=None, iz=None):
+    """
+    The same section of every model, (h, w, N) contiguous float32, oriented as section(): extracted once, so that
+    per-cluster statistics of a section cost h x w cells per model instead of the whole grid.
+    """
+    nz, ny, nx, N = core.shape
+    if orient == 'y':
+        s = core[:, ny // 2 if iy is None else iy, :, :]
+    elif orient == 'x':
+        s = core[:, :, nx // 2 if ix is None else ix, :]
+    elif orient == 'z':
+        s = core[nz // 2 if iz is None else iz]
+    else:
+        raise ValueError(orient)
+    return np.ascontiguousarray(s, dtype=np.float32)
+
+
+def section_stats(stack, labels, cl, median=True):
+    """
+    Median and standard deviation of the members of cluster cl on one section (stack from section_stack), equal to
+    the section of the median and standard-deviation models of cluster_stats (both are computed cell by cell).
+    Returns (median or None, std, idx).
+    """
+    idx = np.flatnonzero(labels == cl)
+    m = stack[..., idx]
+    return (np.median(m, axis=-1) if median else None), m.std(axis=-1), idx
+
+
 def cluster_table(core, coords, labels, chain_id=None, truth=None, truth_cols=('high', 'lens', 'dyke', 'pipe'),
                   min_size=1):
     """
@@ -269,10 +297,11 @@ def plot_cluster_tiles(core, labels, orient='y', iy=None, ix=None, iz=None, stat
     Returns the figure.
     """
     ids = cluster_ids_by_size(labels, min_size)[:max_tiles]
+    stack = section_stack(core, orient, iy, ix, iz)            # the section of every model, extracted once
     panels, ns = [], []
     for cl in ids:
-        med, std, idx = cluster_stats(core, labels, cl, median=(stat == 'median'))
-        panels.append(section(med if stat == 'median' else std, orient, iy, ix, iz))
+        med, std, idx = section_stats(stack, labels, cl, median=(stat == 'median'))
+        panels.append(med if stat == 'median' else std)
         ns.append(len(idx))
     if not panels:
         raise ValueError('no cluster with at least min_size models')
@@ -307,19 +336,38 @@ def plot_cluster_tiles(core, labels, orient='y', iy=None, ix=None, iz=None, stat
 
 
 def plot_cluster_sections(core, coords, labels, cl, orient='y', iy=None, ix=None, iz=None, vmin=None, vmax=None,
-                          vmax_std=None, cmap='viridis', cmap_std='magma'):
-    """Median, standard deviation and representative model of one cluster on one section. Returns the figure."""
-    med, std, idx = cluster_stats(core, labels, cl)
+                          vmax_std=None, cmap='viridis', cmap_std='magma', axis_coords=None, units='cell',
+                          panel_w=3.6):
+    """
+    Median, standard deviation and representative model of one cluster: one row per section in `orient` ('y', 'x',
+    'z', or a sequence such as ('y', 'z') for a 2 x 3 figure), with labelled axes. coords: (N, 2) embedding (for the
+    representative model). axis_coords, units: coordinates of the axes, as in plot_cluster_tiles. The standard
+    deviation panels share one colour scale (0 to vmax_std, the largest value of the panels if None).
+    Returns the figure.
+    """
+    orients = [orient] if isinstance(orient, str) else list(orient)
+    stats = [section_stats(section_stack(core, o, iy, ix, iz), labels, cl) for o in orients]
     rep = core[..., representative_index(coords, labels, cl)]
-    panels = [(section(med, orient, iy, ix, iz), f'median (n={len(idx)})', cmap, vmin, vmax),
-              (section(std, orient, iy, ix, iz), 'standard deviation', cmap_std, 0, vmax_std),
-              (section(rep, orient, iy, ix, iz), 'representative model', cmap, vmin, vmax)]
-    h, w = panels[0][0].shape
-    fig, axes = plt.subplots(1, 3, figsize=(3 * 3.6, 3.6 * h / w + 0.8), constrained_layout=True)
-    for ax, (p, t, cm, lo, hi) in zip(axes, panels):
-        im = ax.imshow(p, cmap=cm, vmin=lo, vmax=hi, origin='upper' if orient != 'z' else 'lower',
-                       aspect='equal', interpolation='nearest')
-        ax.set_title(t, fontsize=9); ax.set_xticks([]); ax.set_yticks([])
-        fig.colorbar(im, ax=ax, fraction=0.045, pad=0.03)
-    fig.suptitle(f'cluster {cl}', fontsize=11)
+    n = len(stats[0][2])
+    if vmax_std is None:
+        vmax_std = max(float(s[1].max()) for s in stats) or 1.0
+    names = {'y': f'section y = {iy}', 'x': f'section x = {ix}', 'z': f'depth map z = {iz}'}
+    heights = [s[0].shape[0] / s[0].shape[1] for s in stats]          # panel height / width of each row
+    fig, axes = plt.subplots(len(orients), 3, figsize=(3 * panel_w, 0.8 * panel_w * sum(heights) + 0.6 * len(orients) + 0.3),
+                             squeeze=False, constrained_layout=True, gridspec_kw=dict(height_ratios=heights))
+    for r, (o, (med, std, _)) in enumerate(zip(orients, stats)):
+        extent, hname, vname = section_extent(o, core.shape[:3], axis_coords)
+        panels = [(med, f'median (n={n})', cmap, vmin, vmax),
+                  (std, 'standard deviation', cmap_std, 0, vmax_std),
+                  (section(rep, o, iy, ix, iz), 'representative model', cmap, vmin, vmax)]
+        for ax, (p, t, cm, lo, hi) in zip(axes[r], panels):
+            im = ax.imshow(p, cmap=cm, vmin=lo, vmax=hi, origin='upper' if o != 'z' else 'lower', extent=extent,
+                           aspect='equal' if axis_coords is None else 'auto', interpolation='nearest')
+            ax.set_title(f'{t}, {names[o]}', fontsize=9)
+            ax.set_xlabel(f'{hname} ({units})', fontsize=8)
+            ax.set_ylabel(f'{vname} ({units})', fontsize=8)
+            ax.tick_params(labelsize=7)
+            ax.xaxis.set_major_locator(MaxNLocator(5)); ax.yaxis.set_major_locator(MaxNLocator(5))
+            fig.colorbar(im, ax=ax, fraction=0.045, pad=0.03).ax.tick_params(labelsize=7)
+    fig.suptitle(f'cluster {cl} ({n} models)', fontsize=11)
     return fig
