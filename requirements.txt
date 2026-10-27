@@ -1,0 +1,22 @@
+# PostTopo: packages needed by the course notebooks and modules/ (Python >= 3.9).
+# Local install, from the repository root:  pip install -r requirements.txt
+# Lower bounds are set only where the code relies on a specific API.
+
+# Scientific stack (pre-installed on Google Colab)
+numpy
+scipy
+pandas
+matplotlib>=3.5           # matplotlib.colormaps registry
+scikit-learn>=1.3         # sklearn.cluster.HDBSCAN
+joblib>=1.3               # Parallel(return_as='generator')
+networkx
+pillow                    # imported as PIL
+
+# Not pre-installed on Colab (the notebooks' setup cell installs these)
+umap-learn                # imported as umap
+connected-components-3d   # imported as cc3d
+bokeh>=3.4                # interactive cluster viewer
+colorcet                  # glasbey cluster palette; tab20 is used if missing
+
+# Notebook front end (local runs only)
+jupyter
