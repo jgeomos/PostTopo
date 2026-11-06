@@ -64,8 +64,9 @@ def _hex(c):
     return matplotlib.colors.to_hex(c)
 
 
-def _image_figure(title, w_cells, h_cells, mapper, orient, width=320):
-    """Figure holding one image glyph; returns (figure, source). Vertical sections are drawn with depth increasing downwards."""
+def _image_figure(title, w_cells, h_cells, mapper, orient, width=320, unit=None):
+    """Figure holding one image glyph; returns (figure, source). Vertical sections are drawn with depth increasing
+    downwards. `unit` is written above the colour bar (None: no title)."""
     height = int(width * h_cells / w_cells) + 40
     p = figure(width=width, height=height, title=title, x_range=Range1d(0, w_cells), y_range=Range1d(0, h_cells),
                tools='', toolbar_location=None, match_aspect=True)
@@ -77,14 +78,16 @@ def _image_figure(title, w_cells, h_cells, mapper, orient, width=320):
     else:
         p.yaxis.axis_label = 'y (cells)'
     p.xaxis.axis_label = 'x (cells)' if orient != 'x' else 'y (cells)'
-    p.add_layout(ColorBar(color_mapper=mapper, width=8), 'right')
+    p.add_layout(ColorBar(color_mapper=mapper, width=8, title=unit, title_standoff=6,
+                          title_text_font_size='12px', title_text_font_style='normal',
+                          title_text_align='center'), 'right')
     return p, src
 
 
 def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None, truth=None,
                  min_size=5, max_clusters=60, vmin=None, vmax=None, vmax_std=None, thumb_orient='y', orient='y',
                  title='Cluster viewer', with_table=True, max_thumbs=3000, seed=0,
-                 motifs=None, topology=None, extra=None, tooltip_extra=None):
+                 motifs=None, topology=None, extra=None, tooltip_extra=None, unit='kg/m³'):
     """
     Build the Bokeh layout of the viewer.
 
@@ -105,6 +108,8 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
     topology : (N,) topology class of each model (1 = most frequent, cluster_tools.topology_classes).
     extra : DataFrame (N rows) of per-model scalars, shown as cluster means; tooltip_extra : its columns shown
         in the hover (e.g. ['n_units', 'n_born']).
+    unit : unit of the model values, written above the colour bars of the median, std and representative panels
+        (the standard deviation has the unit of the model); None = no unit.
     """
     nz, ny, nx, N = core.shape
     orient0 = orient
@@ -276,7 +281,7 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
         panels[o], img_srcs[o] = {}, {}
         for s, t, m in (('med', 'median model', mapper), ('std', 'standard deviation', mapper_std),
                         ('rep', 'representative model', mapper)):
-            panels[o][s], img_srcs[o][s] = _image_figure(t, w, h, m, o)
+            panels[o][s], img_srcs[o][s] = _image_figure(t, w, h, m, o, unit=unit)
             panels[o][s].visible = (o == orient0)
     info_div = Div(text=stats['info'][0], width=560)
     select = Select(title='Cluster (sorted by size)', value='0',
