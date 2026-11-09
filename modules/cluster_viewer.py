@@ -84,10 +84,31 @@ def _image_figure(title, w_cells, h_cells, mapper, orient, width=320, unit=None)
     return p, src
 
 
+def _guide_html(thumb_where, partial_thumbs, has_chain, has_m):
+    """HTML of the short 'How to use' note placed under the section panels."""
+    items = [f'<b>Hover</b> over a point to see its model on the {thumb_where}'
+             + (' (grey box: no preview stored)' if partial_thumbs else '') + '.',
+             '<b>Click</b> a point to select its cluster: its members are highlighted and the panels above show '
+             'this cluster. The drop-down list does the same.',
+             '<b>Zoom</b> with the mouse wheel, <b>pan</b> by dragging; the toolbar has a box zoom and a reset button.']
+    c = []
+    if has_chain:
+        c.append('<b>Colour points by chain</b> to check that the chains mix: a cluster drawn from a single chain '
+                 'may show a chain stuck in one mode')
+    if has_m:
+        c.append(('or by motif' if has_chain else '<b>Colour points by motif</b>')
+                 + ' to see which models contain a given motif')
+    if c:
+        items.append(('; ' if has_chain and has_m else '').join(c) + '.')
+    return ('<div style="font-size:12px; line-height:1.4"><b>How to use</b>'
+            '<ul style="margin:2px 0 0 0; padding-left:18px">' + ''.join(f'<li>{t}</li>' for t in items)
+            + '</ul></div>')
+
+
 def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None, truth=None,
                  min_size=5, max_clusters=60, vmin=None, vmax=None, vmax_std=None, thumb_orient='y', orient='y',
                  title='Cluster viewer', with_table=True, max_thumbs=3000, seed=0,
-                 motifs=None, topology=None, extra=None, tooltip_extra=None, unit='kg/m³'):
+                 motifs=None, topology=None, extra=None, tooltip_extra=None, unit='kg/m³', guide=True):
     """
     Build the Bokeh layout of the viewer.
 
@@ -110,6 +131,8 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
         in the hover (e.g. ['n_units', 'n_born']).
     unit : unit of the model values, written above the colour bars of the median, std and representative panels
         (the standard deviation has the unit of the model); None = no unit.
+    guide : True = short 'How to use' note under the section panels (the colour-by item only when that menu
+        exists), False = none, str = your own HTML in its place.
     """
     nz, ny, nx, N = core.shape
     orient0 = orient
@@ -417,11 +440,19 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
                       f'(at least {min_size} models each); sections at y = {iy}, x = {ix}, z = {iz}'
                       + (f'; hover previews for {len(with_thumb)} models (grey box for the others)' if len(with_thumb) < N else '')
                       + '.</span>', width=900)
+    guide_div = []
+    if guide:
+        where = {'y': f'vertical section at y = {iy}', 'x': f'vertical section at x = {ix}',
+                 'z': f'depth map at z = {iz}'}[thumb_orient]
+        text = guide if isinstance(guide, str) else _guide_html(
+            where, len(with_thumb) < N, chain_id is not None and len(chains) > 1, has_m)
+        guide_div = [Div(text=text, width=640, styles={'margin-top': '10px'})]
     right = column(row(select, orient), info_div,
-                   *[row(panels[o]['med'], panels[o]['std'], panels[o]['rep']) for o, _ in _ORIENTS])
+                   *[row(panels[o]['med'], panels[o]['std'], panels[o]['rep']) for o, _ in _ORIENTS], *guide_div)
     left = ([row(cby, legend_div)] if cby is not None else []) + [p_emb] + ([p_hm] if p_hm is not None else []) \
         + ([table] if with_table else [])
-    layout = column(header, row(column(*left), right))
+    top = [header]
+    layout = column(*top, row(column(*left), right))
 
     # initial state: first cluster, y section
     k0 = 0
