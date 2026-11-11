@@ -20,7 +20,7 @@ You can run the notebooks in your browser without local installation using Googl
 
 Run the first code cell (*0.1 Setup*) once: it clones this repository into `/content/PostTopo` (modules and data included), installs the packages that Colab lacks and imports the modules. The remaining cells can then be run in order (*Runtime > Run all* also works). A Google account is required; no GPU is needed.
 
-Files written by the notebooks (cached features in `data/`, interactive cluster viewers `*_cluster_viewer_*.html`) are stored in the Colab session and are lost when the runtime is disconnected. They can be downloaded from the *Files* panel on the left-hand side.
+Files written by the notebooks (cached features in `data/`; embedding, cluster labels and interactive cluster viewers in `outputs/`) are stored in the Colab session and are lost when the runtime is disconnected. They can be downloaded from the *Files* panel on the left-hand side.
 
 ## Local execution
 
@@ -41,4 +41,5 @@ The notebooks must be launched from the repository root so that `modules/` and `
 - `cluster_workflow_synthetic.ipynb`, `cluster_workflow_field.ipynb`: course notebooks.
 - `modules/`: Python modules used by the notebooks (synthetic ensemble generator, feature extraction, clustering, interactive viewer, motif analysis and plotting).
 - `data/`: Boulia ensemble (2000 post-burn-in models from five chains), prior model and topology.
-- `*_cluster_viewer_*.html`: pre-computed interactive cluster viewers, to be opened in a web browser.
+- `*_cluster_viewer_*.html`: pre-computed interactive cluster viewers, to be opened in a web browser. A run of the notebooks writes its own viewers in `outputs/` (not tracked by git) and leaves these unchanged.
+- `LICENSE`: GNU General Public License v3.0.
