@@ -5,7 +5,7 @@ Computes 6 scalar features per 3D labelled model:
   0. k             — number of discrete geological units
   1. total_cc      — total connected components across all units
   2. fiedler_w     — weighted Fiedler value (algebraic connectivity)
-  3. he_entropy    — weighted hyperedge entropy (triple+ junctions)
+  3. he_entropy    — hyperedge entropy of the junction types (sets of >= 3 units meeting at a vertex)
   4. mean_herf     — mean Herfindahl index (fragmentation concentration)
   5. mean_ellip    — mean ellipticity of largest component per unit
 
@@ -63,6 +63,12 @@ def _weighted_fiedler(units, contacts):
 
 
 def _hyperedge_entropy(model):
+    """
+    Shannon entropy (bits) of the junction types of a model. At each grid vertex, the units of the 8 cells
+    sharing it are collected; a vertex where three or more units meet is a junction, and its type is the set
+    of those units (which units meet, not how many cells each occupies), i.e. one column of the incidence
+    matrix of the contact hypergraph.
+    """
     corners = np.stack([
         model[:-1, :-1, :-1], model[:-1, :-1, 1:],
         model[:-1, 1:, :-1],  model[:-1, 1:, 1:],
@@ -71,22 +77,23 @@ def _hyperedge_entropy(model):
     ], axis=-1).reshape(-1, 8)
 
     s = np.sort(corners, axis=1)
-    n_unique = np.sum(np.diff(s, axis=1) != 0, axis=1) + 1
-    triple = s[n_unique >= 3]
-
-    if len(triple) == 0:
+    dup = np.zeros(s.shape, dtype=bool)
+    dup[:, 1:] = s[:, 1:] == s[:, :-1]            # label repeated within the vertex
+    junction = (~dup).sum(axis=1) >= 3
+    if not junction.any():
         return 0.0
 
-    # Use sorted rows directly as hash keys (duplicates within a row
-    # don't matter — two rows with same sorted content = same hyperedge)
-    keys = np.ascontiguousarray(triple).view(
-        np.dtype((np.void, triple.dtype.itemsize * 8))
-    ).ravel()
+    # Junction type = set of units: repeated labels are replaced by a filler and moved to the end of the row,
+    # so that vertices joining the same units give the same row whatever the number of cells of each unit.
+    s, dup = s[junction], dup[junction]
+    fill = np.inf if np.issubdtype(s.dtype, np.floating) else np.iinfo(s.dtype).max
+    s = np.sort(np.where(dup, fill, s), axis=1)
+    keys = np.ascontiguousarray(s).view(np.dtype((np.void, s.dtype.itemsize * 8))).ravel()
     _, counts = np.unique(keys, return_counts=True)
 
-    probs = counts.astype(float)
-    probs /= probs.sum()
-    return float(-np.sum(probs * np.log2(probs)))
+    probs = counts / counts.sum()
+    return float(-np.sum(probs * np.log2(probs)) + 0.0)    # + 0.0: a single type gives 0.0, not -0.0
+
 
 def _ellipticity(coords):
     """Ellipticity from covariance eigenvalues: 1 - min/max."""

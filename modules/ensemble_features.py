@@ -53,6 +53,11 @@ from joblib import Parallel, delayed
 
 from topo_features import compute_topo_features, FEATURE_NAMES as TOPO_FEATURE_NAMES
 
+# Version of the feature definitions, written into the fingerprint of saved features: increase it when a
+# definition changes, so that features saved with the previous one are recomputed.
+# 2: hyperedge entropy with junction type = set of units (was: sorted labels of the 8 cells).
+FEATURES_VERSION = 2
+
 DENSITY_FEATURE_NAMES = ['density_mean', 'density_std', 'density_skew', 'density_kurtosis', 'density_range']
 
 # Unordered pairs of the 27 voxels of a 3x3x3 neighbourhood, in the order of

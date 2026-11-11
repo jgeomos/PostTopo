@@ -119,10 +119,11 @@ def density_range(core, q=(0.5, 99.5), n_sample=200):
 # Features
 # ---------------------------------------------------------------------------
 def _fingerprint(core, n=20):
-    """Shape of the ensemble and hash of n models spread over it."""
+    """Shape of the ensemble, hash of n models spread over it and version of the feature definitions."""
     N = core.shape[-1]
     idx = np.unique(np.linspace(0, N - 1, min(N, n)).round().astype(int))
-    return f"{core.shape} " + hashlib.sha1(np.ascontiguousarray(core[..., idx]).tobytes()).hexdigest()
+    return (f"{core.shape} " + hashlib.sha1(np.ascontiguousarray(core[..., idx]).tobytes()).hexdigest()
+            + f" features v{ef.FEATURES_VERSION}")
 
 
 def _load_cached(files, fp_file, fingerprint, N):
