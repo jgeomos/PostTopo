@@ -29,8 +29,7 @@ Requirements: Python ≥ 3.9 and Jupyter.
 ```bash
 git clone https://github.com/jgeomos/PostTopo.git
 cd PostTopo
-pip install numpy scipy pandas matplotlib scikit-learn networkx joblib pillow \
-            umap-learn connected-components-3d colorcet "bokeh>=3.4" jupyter
+pip install -r requirements.txt
 jupyter notebook cluster_workflow_synthetic.ipynb
 ```
 
@@ -40,6 +39,9 @@ The notebooks must be launched from the repository root so that `modules/` and `
 
 - `cluster_workflow_synthetic.ipynb`, `cluster_workflow_field.ipynb`: course notebooks.
 - `modules/`: Python modules used by the notebooks (synthetic ensemble generator, feature extraction, clustering, interactive viewer, motif analysis and plotting).
-- `data/`: Boulia ensemble (2000 post-burn-in models from five chains), prior model and topology.
-- `*_cluster_viewer_*.html`: pre-computed interactive cluster viewers, to be opened in a web browser. A run of the notebooks writes its own viewers in `outputs/` (not tracked by git) and leaves these unchanged.
+- `data/`: Boulia ensemble (2000 post-burn-in models from five chains, `boulia_5chains_2000models.npz`) and prior model (`boulia_prior_model.npy`); features of the Boulia and synthetic ensembles saved by the notebooks (`*_features_*.npy`, `*_topo.npy`, with a fingerprint file), reloaded instead of being computed again.
+- `technical_note.md`: what the notebooks compute, with equations and references.
+- `requirements.txt`: Python packages needed by the notebooks.
 - `LICENSE`: GNU General Public License v3.0.
+
+A run of the notebooks writes the embedding, the cluster labels and the interactive cluster viewers (self-contained HTML pages, to be opened in a web browser) in `outputs/`, which is not tracked by git.
