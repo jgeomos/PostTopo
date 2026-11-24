@@ -48,10 +48,15 @@ from cluster_tools import (cluster_ids_by_size, cluster_stats, representative_in
 _ORIENTS = [('y', 'section at fixed y (x-z)'), ('x', 'section at fixed x (y-z)'), ('z', 'depth map (x-y)')]
 
 
-def _png_b64(arr2d, vmin, vmax, cmap='viridis', scale=3, flip=True):
-    """Colour-mapped PNG (base64 data URI) of a 2D array, enlarged `scale` times; row 0 at the top when flip is False."""
+def _png_b64(arr2d, vmin, vmax, cmap='viridis', scale=3, flip=False):
+    """
+    Colour-mapped PNG (base64 data URI) of a 2D array, enlarged `scale` times. Row 0 is drawn at the top (vertical
+    sections: depth index 0 at the top); flip=True draws it at the bottom (depth maps, drawn with y increasing
+    upwards as in the panels of the viewer).
+    """
     cm = matplotlib.colormaps[cmap]
-    a = np.clip((np.asarray(arr2d, dtype=np.float32) - vmin) / (vmax - vmin + 1e-12), 0, 1)
+    a = np.asarray(arr2d, dtype=np.float32)
+    a = np.clip(((a[::-1] if flip else a) - vmin) / (vmax - vmin + 1e-12), 0, 1)
     rgb = (cm(a)[..., :3] * 255).astype(np.uint8)
     im = Image.fromarray(rgb)
     im = im.resize((im.width * scale, im.height * scale), Image.NEAREST)
@@ -231,10 +236,10 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
         rng = np.random.default_rng(seed)
         with_thumb = np.union1d(rng.choice(N, max_thumbs, replace=False), stats['rep_index'])
     h_t, w_t = section(core[..., 0], thumb_orient, iy, ix, iz).shape
-    blank = _png_b64(np.full((h_t, w_t), 0.2, np.float32), 0.0, 1.0, cmap='Greys', flip=False)   # light grey box
+    blank = _png_b64(np.full((h_t, w_t), 0.2, np.float32), 0.0, 1.0, cmap='Greys')   # light grey box
     thumbs = [blank] * N
-    for i in with_thumb:
-        thumbs[i] = _png_b64(section(core[..., i], thumb_orient, iy, ix, iz), vmin, vmax, flip=(thumb_orient != 'z'))
+    for i in with_thumb:                       # depth maps: y increasing upwards, as in the panels
+        thumbs[i] = _png_b64(section(core[..., i], thumb_orient, iy, ix, iz), vmin, vmax, flip=(thumb_orient == 'z'))
     pos = {cl: k for k, cl in enumerate(ids)}
     sc = dict(x=coords[:, 0], y=coords[:, 1], index=np.arange(N), cluster=labels.astype(int),
               pos=[pos.get(int(l), -1) for l in labels],

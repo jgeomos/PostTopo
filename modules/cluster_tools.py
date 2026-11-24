@@ -27,8 +27,16 @@ from sklearn.neighbors import NearestNeighbors
 # Embedding and clustering
 # ---------------------------------------------------------------------------
 def umap_embed(features, n_neighbors=5, min_dist=0.01, metric='cosine', random_state=42, **kw):
-    """UMAP embedding (N, 2) of the standardised features, with the parameters of the notebook. Returns (coords, reducer)."""
+    """
+    UMAP embedding (N, 2) of the standardised features, with the parameters of the notebook. Returns (coords, reducer).
+    With umap-learn versions that have the `compatibility_layout` option (0.6 and later), the layout of umap-learn 0.5
+    is requested explicitly (the default of 0.6, announced to change), so that the embedding, and the EPS chosen for
+    it, do not change with the default; pass compatibility_layout=False to use the new layout.
+    """
+    import inspect
     import umap
+    if 'compatibility_layout' in inspect.signature(umap.UMAP.__init__).parameters:
+        kw.setdefault('compatibility_layout', True)
     reducer = umap.UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=min_dist, metric=metric,
                         random_state=random_state, **kw)
     coords = reducer.fit_transform(features)

@@ -48,7 +48,6 @@ from __future__ import annotations
 
 import os
 import numpy as np
-from scipy.stats import skew, kurtosis
 from joblib import Parallel, delayed
 
 from topo_features import compute_topo_features, FEATURE_NAMES as TOPO_FEATURE_NAMES
@@ -238,9 +237,22 @@ class DiffNetEncoder:
 # Topological and density features
 # ---------------------------------------------------------------------------
 def compute_density_features(model):
-    """Moments of the per-voxel density distribution of one model: [mean, std, skewness, kurtosis (Fisher), range]."""
+    """
+    Moments of the per-voxel density distribution of one model: [mean, std, skewness, kurtosis (Fisher), range].
+    Skewness m3 / m2^(3/2) and excess kurtosis m4 / m2^2 - 3 (m_r: central moments, biased estimates) are those of
+    scipy.stats.skew and scipy.stats.kurtosis with their defaults, computed from one array of deviations; nan for a
+    model of one density, as in scipy.
+    """
     v = np.asarray(model).ravel().astype(np.float64)
-    return np.array([v.mean(), v.std(), skew(v), kurtosis(v), v.max() - v.min()], dtype=np.float32)
+    mean = v.mean()
+    d = v - mean
+    d2 = d * d
+    m2, m3, m4 = d2.mean(), (d2 * d).mean(), (d2 * d2).mean()
+    with np.errstate(divide='ignore', invalid='ignore'):
+        flat = m2 <= (np.finfo(np.float64).eps * mean) ** 2                  # scipy's test for constant data
+        sk = np.nan if flat else m3 / m2 ** 1.5
+        ku = np.nan if flat else m4 / m2 ** 2 - 3.0
+    return np.array([mean, np.sqrt(m2), sk, ku, v.max() - v.min()], dtype=np.float32)
 
 
 def _topo_dens_batch(batch):

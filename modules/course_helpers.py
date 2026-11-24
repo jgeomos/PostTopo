@@ -85,15 +85,19 @@ def load_synthetic(n_per_chain=1000, seed=0, padd=6, max_models=None):
     return core, chain_id, truth
 
 
-def load_field(path, max_models=None, flip_depth=True, swap_yx=True):
+def load_field(path, max_models=None, flip_depth=None, swap_yx=True):
     """
     Post-burn-in models saved by export_boulia_subset_cell.py (.npz with models (depth, y, x, model), chain_id,
-    chains, burn_in, padd; lateral padding already removed). The depth axis is flipped and the two lateral axes are
-    swapped (flip_depth, swap_yx), as in the data cell of the original notebook. Returns (core, chain_id, padd).
+    chains, burn_in, padd, flip_depth; lateral padding already removed). The two lateral axes are swapped (swap_yx),
+    as in the data cell of the original notebook, and the depth axis is flipped back when the export reversed it, so
+    that index 0 is the top. flip_depth: None = as recorded in the file (`flip_depth`, True if absent), or
+    True / False to force it. Returns (core, chain_id, padd).
     """
     with np.load(path) as d:
         core, chain_id, padd = d['models'].astype(np.float32, copy=False), d['chain_id'], int(d['padd'])
         n_chains, burn_in = len(d['chains']), int(d['burn_in'])
+        if flip_depth is None:
+            flip_depth = bool(d['flip_depth']) if 'flip_depth' in d.files else True
     if flip_depth:
         core = core[::-1]
     if swap_yx:
@@ -135,8 +139,11 @@ def _load_cached(files, fp_file, fingerprint, N):
         return None, f"saved features hold {len(parts[0])} models, the ensemble {N}"
     if os.path.exists(fp_file):
         with open(fp_file) as f:
-            if f.read().strip() != fingerprint:
-                return None, "saved features belong to another ensemble (fingerprint differs)"
+            saved = f.read().strip()
+        if saved != fingerprint:
+            same_models = saved.split(' features v')[0] == fingerprint.split(' features v')[0]
+            return None, ("saved features use an older version of the feature definitions" if same_models else
+                          "saved features belong to another ensemble (fingerprint differs)")
     else:                                   # saved before fingerprints existed: same N, assumed same models
         print("no fingerprint saved with the features: assumed to match this ensemble (same number of models)")
         with open(fp_file, 'w') as f:
@@ -655,15 +662,21 @@ def motif_presence(df_motifs, motifs, members, where, truth=None, thr=None):
 
 
 def hypothesis_probabilities(df_motifs, members, where, labels, chain_id, basement, group_by='chain', min_size=1,
-                             n_groups=6, depth_cells=3, extra=None):
+                             n_groups=6, depth_cells=3, extra=None, drop=()):
     """
     P(H | d) of the hypotheses of cluster_motifs.hypotheses, plus `extra` ({name: function of the motif table}),
-    per chain or per cluster, as a table and as bars with binomial standard errors.
+    minus those named in `drop`, per chain or per cluster, as a table and as bars with binomial standard errors.
+    Returns the table (columns P and SE per hypothesis, N per group).
     """
     rows, groups = cm.hypothesis_groups(members, labels, chain_id, group_by, min_size, n_groups)
     d = df_motifs.iloc[rows].reset_index(drop=True)
     H = {**cm.hypotheses(d, basement=basement, depth_cells=depth_cells),
          **{k: f(d) for k, f in (extra or {}).items()}}
+    unknown = sorted(set(drop) - set(H))
+    if unknown:
+        warnings.warn(f"hypotheses to drop not found: {unknown}; hypotheses: {list(H)}")
+    H = {k: v for k, v in H.items() if k not in set(drop)}
     tab = ma.hypothesis_table(H, groups=groups)
     display(tab['P'].round(3))
     mp.plot_hypotheses(tab, title=f'P(H | d) in {where}, per {group_by}', legend_title=group_by)
+    return tab
