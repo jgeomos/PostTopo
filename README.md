@@ -11,6 +11,10 @@ The notebooks cluster an ensemble of posterior models and interpret the clusters
 
 # Running the examples
 
+## Fully run results
+Repository with results: 
+https://zenodo.org/records/23997718
+
 ## Browser-based examples
 
 You can run the notebooks in your browser without local installation using Google Colab:
