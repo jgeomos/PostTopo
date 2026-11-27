@@ -4,6 +4,7 @@ Posterior ensemble analysis for structural and geometrical models models.
 
 The notebooks cluster an ensemble of posterior models and interpret the clusters with geometrical and topological motifs. Each model is described by a feature vector (encoder values, topological scalars and density moments), embedded with UMAP (Uniform Manifold Approximation and Projection; McInnes et al., 2018) and clustered with DBSCAN (Density-Based Spatial Clustering of Applications with Noise; Ester et al., 1996).
 
+## Running in the cloud
 | Notebook | Ensemble | Open in Colab |
 |---|---|---|
 | `cluster_workflow_synthetic.ipynb` | Synthetic ensemble, geometry known model by model | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jgeomos/PostTopo/blob/main/cluster_workflow_synthetic.ipynb) |
