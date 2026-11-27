@@ -1,6 +1,6 @@
 # PostTopo
 
-Posterior ensemble analysis: notebooks and code for the short course *Probabilistic geometrical inversion: from model sampling to (geological) assessment* (ASEG Discover 2026).
+Posterior ensemble analysis for structural and geometrical models models.
 
 The notebooks cluster an ensemble of posterior models and interpret the clusters with geometrical and topological motifs. Each model is described by a feature vector (encoder values, topological scalars and density moments), embedded with UMAP (Uniform Manifold Approximation and Projection; McInnes et al., 2018) and clustered with DBSCAN (Density-Based Spatial Clustering of Applications with Noise; Ester et al., 1996).
 
