@@ -116,13 +116,13 @@ where m\_i(**x**) is the density of model i at cell **x**, |c| the number of mem
 
 **Largest clusters (cell 4.2).** Median, standard-deviation and representative models of the `N_SHOW` largest clusters, on the section y = `IY` and the map z = `IZ`.
 
-**Viewer (cell 4.3).** A self-contained HTML page (Bokeh), also saved in `outputs/`: hovering over a point of the embedding shows the section of its model, its cluster, its chain and, for the synthetic ensemble, the bodies drawn in it; tapping a point, or choosing in the menu, shows the median, standard-deviation and representative models of its cluster; the page also holds the cluster table. Clusters smaller than `MIN_SAMPLES`, and those beyond the `MAX_CLUSTERS` largest, are grey.
+**Viewer (cell 4.3).** A self-contained HTML page (Bokeh), also saved in `outputs/`: hovering over a point of the embedding shows the section of its model, its cluster, its chain and, for the synthetic ensemble, the bodies drawn in it; tapping a point, or choosing in the menu, shows the median, standard-deviation and representative models of its cluster; the page also holds the cluster table. Clusters smaller than `MIN_SAMPLES`, and those beyond the `MAX_CLUSTERS` largest, are grey. Below these panels, the entropy of the unit, H(**x**) = −Σ\_k p\_k(**x**) ln p\_k(**x**), and the probability of a born unit, p\_born(**x**), are computed over the members of the cluster, p\_k(**x**) being the fraction of them whose cell **x** belongs to reference unit k (or to a born unit), with units matched to the reference model of cell 1.2 (see Section 5); the cluster table gives their means over the cells. H is 0 where all members hold the same unit and measures the spread of the cluster in unit geometry, which s\_c mixes with the sampled densities (Wellmann & Regenauer-Lieb 2012; Pirot et al. 2022).
 
 ## 5. Motifs and topology of the clusters
 
 Independently of the features, each model is reduced to a graph of its bodies and to a row of motif counts (`motif_analysis.py`); comparing motif frequencies inside and outside a cluster names the cluster in geological terms (right-hand route of Fig. 1).
 
-**Unit identity across models (cell 5.2).** Motifs need to know which unit is the cover, which the basement and which units were born, but sampled densities cannot be compared across models (label switching; Stephens 2000; Jasra et al. 2005). Each model is matched to a reference model r: the prior model of the generator (synthetic) or of the sampler (`data/boulia_prior_model.npy`, oriented on the grid of `core` automatically; a modal stand-in is built without it). Reference units are numbered k = 0, …, K − 1 by increasing mean depth, so that 0 is the cover and K − 1 the basement; units occupying less than `MIN_UNIT_SHARE` (1 %) of the grid are absorbed by their nearest unit. For a model with distinct density values v,
+**Unit identity across models (cell 1.2).** The viewers (cells 4.3 and 5.4) and the motifs need to know which unit is the cover, which the basement and which units were born, but sampled densities cannot be compared across models (label switching; Stephens 2000; Jasra et al. 2005). Each model is matched to a reference model r: the prior model of the generator (synthetic) or of the sampler (`data/boulia_prior_model.npy`, oriented on the grid of `core` automatically; a modal stand-in is built without it). Reference units are numbered k = 0, …, K − 1 by increasing mean depth, so that 0 is the cover and K − 1 the basement; units occupying less than `MIN_UNIT_SHARE` (1 %) of the grid are absorbed by their nearest unit. For a model with distinct density values v,
 
 ```math
 T_{vk} = \#\{\mathbf{x} : m(\mathbf{x}) = v,\ r(\mathbf{x}) = k\}
@@ -235,6 +235,7 @@ where r\_j is a value regarded as fully typical, so that μ\_j = 0 at the thresh
 - McInnes, L., Healy, J. & Melville, J., 2018. UMAP: Uniform Manifold Approximation and Projection for dimension reduction, arXiv:1802.03426.
 - Milo, R., Shen-Orr, S., Itzkovitz, S., Kashtan, N., Chklovskii, D. & Alon, U., 2002. Network motifs: simple building blocks of complex networks, *Science*, 298(5594), 824–827.
 - Osher, S. & Sethian, J.A., 1988. Fronts propagating with curvature-dependent speed: algorithms based on Hamilton–Jacobi formulations, *J. Comput. Phys.*, 79(1), 12–49.
+- Pirot, G., Joshi, R., Giraud, J., Lindsay, M.D. & Jessell, M.W., 2022. loopUI-0.1: indicators to support needs and practices in 3D geological modelling uncertainty quantification, *Geosci. Model Dev.*, 15, 4689–4708, doi:10.5194/gmd-15-4689-2022.
 - Rashidifard, M., Giraud, J., Lindsay, M. & Jessell, M., 2024. Cooperative geophysical inversion integrated with 3-D geological modelling in the Boulia region, QLD, *Geophys. J. Int.*, 238, 860–880.
 - Robert, C.P. & Casella, G., 2004. *Monte Carlo Statistical Methods*, 2nd edn, Springer.
 - Rosenfeld, A. & Pfaltz, J.L., 1966. Sequential operations in digital picture processing, *J. ACM*, 13(4), 471–494.
@@ -243,5 +244,6 @@ where r\_j is a value regarded as fully typical, so that μ\_j = 0 at the thresh
 - Stephens, M., 2000. Dealing with label switching in mixture models, *J. R. Stat. Soc. B*, 62(4), 795–809.
 - Thiele, S.T., Jessell, M.W., Lindsay, M., Ogarko, V., Wellmann, J.F. & Pakyuz-Charrier, E., 2016a. The topology of geology 1: Topological analysis, *J. Struct. Geol.*, 91, 27–38.
 - Thiele, S.T., Jessell, M.W., Lindsay, M., Wellmann, J.F. & Pakyuz-Charrier, E., 2016b. The topology of geology 2: Topological uncertainty, *J. Struct. Geol.*, 91, 74–87.
+- Wellmann, J.F. & Regenauer-Lieb, K., 2012. Uncertainties have a meaning: information entropy as a quality measure for 3-D geological models, *Tectonophysics*, 526–529, 207–216.
 - Woodcock, N.H., 1977. Specification of fabric shapes using an eigenvalue method, *Geol. Soc. Am. Bull.*, 88(9), 1231–1236.
 - Zadeh, L.A., 1965. Fuzzy sets, *Information and Control*, 8(3), 338–353.

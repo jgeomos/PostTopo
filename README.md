@@ -43,7 +43,7 @@ The notebooks must be launched from the repository root so that `modules/` and `
 ## Repository content
 
 - `cluster_workflow_synthetic.ipynb`, `cluster_workflow_field.ipynb`: course notebooks.
-- `modules/`: Python modules used by the notebooks (synthetic ensemble generator, feature extraction, clustering, interactive viewer, motif analysis and plotting).
+- `modules/`: Python modules used by the notebooks (synthetic ensemble generator, feature extraction, clustering, interactive viewer with unit entropy and born units after loopUI, motif analysis and plotting).
 - `data/`: Boulia ensemble (2000 post-burn-in models from five chains, `boulia_5chains_2000models.npz`) and prior model (`boulia_prior_model.npy`); features of the Boulia and synthetic ensembles saved by the notebooks (`*_features_*.npy`, `*_topo.npy`, with a fingerprint file), reloaded instead of being computed again.
 - `technical_note.md`: what the notebooks compute, with equations and references.
 - `requirements.txt`: Python packages needed by the notebooks.

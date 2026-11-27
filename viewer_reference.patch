@@ -1,0 +1,1422 @@
+diff --git a/README.md b/README.md
+index 26ba1dd..8d4c353 100644
+--- a/README.md
++++ b/README.md
+@@ -43,7 +43,7 @@ The notebooks must be launched from the repository root so that `modules/` and `
+ ## Repository content
+ 
+ - `cluster_workflow_synthetic.ipynb`, `cluster_workflow_field.ipynb`: course notebooks.
+-- `modules/`: Python modules used by the notebooks (synthetic ensemble generator, feature extraction, clustering, interactive viewer, motif analysis and plotting).
++- `modules/`: Python modules used by the notebooks (synthetic ensemble generator, feature extraction, clustering, interactive viewer with unit entropy and born units after loopUI, motif analysis and plotting).
+ - `data/`: Boulia ensemble (2000 post-burn-in models from five chains, `boulia_5chains_2000models.npz`) and prior model (`boulia_prior_model.npy`); features of the Boulia and synthetic ensembles saved by the notebooks (`*_features_*.npy`, `*_topo.npy`, with a fingerprint file), reloaded instead of being computed again.
+ - `technical_note.md`: what the notebooks compute, with equations and references.
+ - `requirements.txt`: Python packages needed by the notebooks.
+diff --git a/cluster_workflow_field.ipynb b/cluster_workflow_field.ipynb
+index 10bbd9f..1ca130a 100644
+--- a/cluster_workflow_field.ipynb
++++ b/cluster_workflow_field.ipynb
+@@ -9,7 +9,7 @@
+     "\n",
+     "The steps of `cluster_workflow_synthetic.ipynb`, applied to post-burn-in models of the trans-dimensional (trans-D) inversion of the Boulia area:\n",
+     "\n",
+-    "1. **Data**: models from five chains.\n",
++    "1. **Data**: models from five chains, and the prior model of the sampler as reference.\n",
+     "2. **Features**: each model $m_i$ ($i = 1, \\dots, N$) is described by $\\mathbf{f}_i \\in \\mathbb{R}^{523}$: 512 encoder values, 6 topological scalars and 5 density moments.\n",
+     "3. **Embedding and clustering**: UMAP (Uniform Manifold Approximation and Projection; McInnes et al., 2018), then DBSCAN (Density-Based Spatial Clustering of Applications with Noise; Ester et al., 1996).\n",
+     "4. **Cluster statistics**: median and standard-deviation models of each cluster, interactive viewer.\n",
+@@ -109,6 +109,33 @@
+     "nz, ny, nx, N = core.shape"
+    ]
+   },
++  {
++   "cell_type": "markdown",
++   "id": "1d9c44d5",
++   "metadata": {},
++   "source": [
++    "### 1.2  Reference model and sections\n",
++    "\n",
++    "Units are matched across models by overlap with the prior model of the sampler (label switching; Stephens, 2000), read from `PRIOR_FILE` and oriented on the grid of `core` automatically. If the check figure shows a mirror image of the models, `PRIOR_ROW` selects another row of the orientation table; without the file, a modal stand-in is built from the ensemble. The reference is used by the viewers (4.3, 5.4) and the motifs (5.2). `IY`, `IX` and `IZ` are the sections of all the figures and viewers."
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": null,
++   "id": "565afcb1",
++   "metadata": {},
++   "outputs": [],
++   "source": [
++    "# 1.2  Choose the sections of the figures, then orient the prior model as reference and check it\n",
++    "IY, IX, IZ = ny // 2, nx // 2, 10      # section indices: y = IY (x-z panel), x = IX (y-z panel), map at z = IZ\n",
++    "PRIOR_FILE = os.path.join(DATA_DIR, 'boulia_prior_model.npy')   # prior model of the sampler\n",
++    "PRIOR_ROW = 0            # row of the orientation table used for the prior (0 = best agreement)\n",
++    "MIN_UNIT_SHARE = 0.01    # reference units below this share of the grid are absorbed by their nearest unit\n",
++    "\n",
++    "ref = ch.reference(core, PRIOR_FILE, padd, MIN_UNIT_SHARE, row=PRIOR_ROW, check=(IY, IZ))\n",
++    "K = int(ref.max()) + 1                 # number of reference units; code K - 1 is the basement"
++   ]
++  },
+   {
+    "cell_type": "markdown",
+    "id": "10e48b56",
+@@ -246,9 +273,9 @@
+    "source": [
+     "## 4. Cluster statistics and viewer\n",
+     "\n",
+-    "Median and standard-deviation models are computed cell by cell over the members of each cluster. The section at $y$ = `IY` is an $x$–$z$ panel, at $x$ = `IX` a $y$–$z$ panel, the map at $z$ = `IZ` an $x$–$y$ panel. Axes are labelled in cells, or in physical units when `AXIS_COORDS` holds the cell-centre coordinates.\n",
++    "Median and standard-deviation models are computed cell by cell over the members of each cluster. The sections, set in cell 1.2: the section at $y$ = `IY` is an $x$–$z$ panel, at $x$ = `IX` a $y$–$z$ panel, the map at $z$ = `IZ` an $x$–$y$ panel. Axes are labelled in cells, or in physical units when `AXIS_COORDS` holds the cell-centre coordinates.\n",
+     "\n",
+-    "The viewer (4.3) is a self-contained HTML page: hovering over a point shows its model; tapping it, or choosing in the menu, shows its cluster. Clusters smaller than `MIN_SAMPLES`, and those beyond the `MAX_CLUSTERS` largest, are grey."
++    "The viewer (4.3) is a self-contained HTML page: hovering over a point shows its model; tapping it, or choosing in the menu, shows its cluster. Below the median, standard-deviation and representative models, it shows the entropy of the unit and the probability of a born unit over the members of the cluster, units being matched to the reference model of cell 1.2: the spread of the cluster in unit geometry, which the standard deviation mixes with the sampled densities, and where its models hold units absent from the prior. Clusters smaller than `MIN_SAMPLES`, and those beyond the `MAX_CLUSTERS` largest, are grey."
+    ]
+   },
+   {
+@@ -269,7 +296,6 @@
+    "outputs": [],
+    "source": [
+     "# 4.1  Plot median and standard-deviation tiles of all clusters on the section y = IY\n",
+-    "IY, IX, IZ = ny // 2, nx // 2, 10      # section indices: y = IY (x-z panel), x = IX (y-z panel), map at z = IZ\n",
+     "AXIS_COORDS = None                     # or dict(z=..., y=..., x=...): cell-centre coordinates along the axes of core\n",
+     "AXIS_UNITS = 'cell'                    # unit of AXIS_COORDS, e.g. 'm'\n",
+     "VMIN, VMAX = ch.density_range(core)    # common colour scale of the densities (0.5th and 99.5th percentiles)\n",
+@@ -324,7 +350,8 @@
+     "MAX_CLUSTERS = None      # clusters coloured in the viewers, largest first (None = all; the others are grey)\n",
+     "\n",
+     "layout = cv.build_viewer(core, coords, labels, chain_id, iy=IY, ix=IX, iz=IZ, min_size=MIN_SAMPLES,\n",
+-    "                         max_clusters=MAX_CLUSTERS, vmin=VMIN, vmax=VMAX, title=f'{FILE_PREFIX}: clusters ({CLUSTERER})')\n",
++    "                         max_clusters=MAX_CLUSTERS, vmin=VMIN, vmax=VMAX, reference=ref,\n",
++    "                         title=f'{FILE_PREFIX}: clusters ({CLUSTERER})')\n",
+     "ch.show_viewer(layout, os.path.join(OUT_DIR, f'{FILE_PREFIX}_cluster_viewer_strings.html'), height=1150)"
+    ]
+   },
+@@ -341,7 +368,7 @@
+     "\n",
+     "where $\\mathbf{1}\\{\\cdot\\}$ is 1 when the condition holds and 0 otherwise, $P(k \\mid c)$ and $P(k)$ are the fractions of models holding motif $k$ in the cluster and in the ensemble (noise included), and $E_{kc}$ is the enrichment (Milo et al., 2002): $E_{kc} \\gg 1$ marks the motifs that characterise the cluster, $E_{kc} \\approx 0$ those it excludes. The clusters come from the features, not from the motifs, so that the enrichment is an independent reading of them. Topology classes (unit contacts and bodies per unit; Thiele et al., 2016b) are numbered by decreasing frequency.\n",
+     "\n",
+-    "Cell 5.1 takes the settings of the motif workflow (`motif_workflow_boulia_v4.ipynb`). Units are matched across models by overlap with the prior model of the sampler (label switching; Stephens, 2000), read from `PRIOR_FILE` and oriented on the grid of `core` automatically. If the check figure of cell 5.2 shows a mirror image of the models, `PRIOR_ROW` selects another row of the orientation table. Without the file, a modal stand-in is built from the ensemble.\n",
++    "Cell 5.1 takes the settings of the motif workflow (`motif_workflow_boulia_v4.ipynb`). Units are matched across models by overlap with the reference model of cell 1.2, the prior model of the sampler (label switching; Stephens, 2000).\n",
+     "\n",
+     "Cell 5.3 lists $P(k \\mid c)$ and the most frequent topology class of each cluster; the motif viewer (5.4) adds the motifs of each model, colouring by motif, and a heatmap of $E_{kc}$ (tap a row to select the cluster)."
+    ]
+@@ -365,14 +392,11 @@
+     "VMIN_VOXELS = 52          # volume floor: bodies with fewer cells are fragments (sampler noise)\n",
+     "MAX_BODIES = 5           # topology key: bodies per unit counted up to this value\n",
+     "ORDER = None             # stratigraphic order of the reference units, top -> bottom (None: by mean depth)\n",
+-    "MIN_UNIT_SHARE = 0.01    # reference units below this share of the grid are absorbed by their nearest unit\n",
+     "CELL_SIZES = (1.0, 1.0, 1.0)   # (dz, dy, dx) in m along the axes of core (y and x swapped on loading); placeholder:\n",
+     "                               # shape classes, steepness and layer aspect are then computed in cells\n",
+     "THR = dict(amin_violation=100)           # thresholds overriding ma.DEFAULTS, e.g. dict(c_min=1.5, amin_link=4)\n",
+     "UNIT_NAMES = {}          # names of the reference units, e.g. {0: 'cover'} (0 = top unit)\n",
+-    "VIEW_MOTIFS = [m for m in ma.MOTIFS if m != 'fragment']    # motifs in the tables and the viewer\n",
+-    "PRIOR_FILE = os.path.join(DATA_DIR, 'boulia_prior_model.npy')   # prior model of the sampler\n",
+-    "PRIOR_ROW = 0            # row of the orientation table used for the prior (0 = best agreement)"
++    "VIEW_MOTIFS = [m for m in ma.MOTIFS if m != 'fragment']    # motifs in the tables and the viewer"
+    ]
+   },
+   {
+@@ -380,9 +404,9 @@
+    "id": "a56de123",
+    "metadata": {},
+    "source": [
+-    "### 5.2  Reference model and motif table\n",
++    "### 5.2  Motif table\n",
+     "\n",
+-    "One row of motif counts per model."
++    "One row of motif counts per model, units being matched to the reference model of cell 1.2."
+    ]
+   },
+   {
+@@ -392,9 +416,7 @@
+    "metadata": {},
+    "outputs": [],
+    "source": [
+-    "# 5.2  Orient the prior model as reference, check it, then count the motifs of each model\n",
+-    "ref = ch.reference(core, PRIOR_FILE, padd, MIN_UNIT_SHARE, row=PRIOR_ROW, check=(IY, IZ))\n",
+-    "K = int(ref.max()) + 1                 # number of reference units; code K - 1 is the basement\n",
++    "# 5.2  Count the motifs of each model, units matched to the reference model of cell 1.2\n",
+     "kw = dict(vmin_voxels=VMIN_VOXELS, reference=ref, cell_sizes=CELL_SIZES, max_bodies=MAX_BODIES, order=ORDER, thr=THR)\n",
+     "vw = mp.Viewer(core, ref, unit_names=UNIT_NAMES, cell_sizes=CELL_SIZES)      # sections with units matched to ref\n",
+     "\n",
+@@ -446,7 +468,7 @@
+     "layout_m = cv.build_viewer(core, coords, labels, chain_id, iy=IY, ix=IX, iz=IZ, min_size=MIN_SAMPLES,\n",
+     "                           max_clusters=MAX_CLUSTERS, vmin=VMIN, vmax=VMAX, thumb_orient=VIEW_SECTION, orient=VIEW_SECTION,\n",
+     "                           motifs=df_motifs[VIEW_MOTIFS], topology=topo_class,\n",
+-    "                           extra=ch.viewer_extra(df_motifs, topo), tooltip_extra=['n_units', 'n_born'],\n",
++    "                           extra=ch.viewer_extra(df_motifs, topo), tooltip_extra=['n_units', 'n_born'], reference=ref,\n",
+     "                           title=f'{FILE_PREFIX}: clusters ({CLUSTERER}), motifs and topology')\n",
+     "ch.show_viewer(layout_m, os.path.join(OUT_DIR, f'{FILE_PREFIX}_cluster_viewer_motifs.html'), height=1600)"
+    ]
+diff --git a/cluster_workflow_synthetic.ipynb b/cluster_workflow_synthetic.ipynb
+index aa7ea03..175ac95 100644
+--- a/cluster_workflow_synthetic.ipynb
++++ b/cluster_workflow_synthetic.ipynb
+@@ -7,7 +7,7 @@
+    "source": [
+     "# Clustering a posterior ensemble and reading the clusters with motifs — synthetic ensemble\n",
+     "\n",
+-    "1. **Data**: a synthetic ensemble whose geometry is known model by model.\n",
++    "1. **Data**: a synthetic ensemble whose geometry is known model by model, and the prior model of the generator as reference.\n",
+     "2. **Features**: each model $m_i$ ($i = 1, \\dots, N$) is described by $\\mathbf{f}_i \\in \\mathbb{R}^{523}$: 512 encoder values, 6 topological scalars and 5 density moments.\n",
+     "3. **Embedding and clustering**: UMAP (Uniform Manifold Approximation and Projection; McInnes et al., 2018), then DBSCAN (Density-Based Spatial Clustering of Applications with Noise; Ester et al., 1996).\n",
+     "4. **Cluster statistics**: median and standard-deviation models of each cluster, interactive viewer.\n",
+@@ -119,6 +119,31 @@
+     "nz, ny, nx, N = core.shape"
+    ]
+   },
++  {
++   "cell_type": "markdown",
++   "id": "6b007f46",
++   "metadata": {},
++   "source": [
++    "### 1.2  Reference model and sections\n",
++    "\n",
++    "Units are matched across models by overlap with the prior model of the generator (label switching; Stephens, 2000): cover, sediments and basement. The reference is used by the viewers (4.3, 5.4) and the motifs (5.2). `IY`, `IX` and `IZ` are the sections of all the figures and viewers: `IY = 22` passes between the basement high and the pipes, and `IZ = 10` cuts the lenses, dykes, pipes and most highs."
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": null,
++   "id": "9e7b09b0",
++   "metadata": {},
++   "outputs": [],
++   "source": [
++    "# 1.2  Choose the sections of the figures, then build the reference model from the prior model of the generator\n",
++    "IY, IX, IZ = 22, nx // 2, 10           # section indices: y = IY (x-z panel), x = IX (y-z panel), map at z = IZ\n",
++    "MIN_UNIT_SHARE = 0.01    # reference units below this share of the grid are absorbed by their nearest unit\n",
++    "\n",
++    "ref = ch.reference(core, se.prior_model(), PADD, MIN_UNIT_SHARE)\n",
++    "K = int(ref.max()) + 1                 # number of reference units; code K - 1 is the basement"
++   ]
++  },
+   {
+    "cell_type": "markdown",
+    "id": "ce42100d",
+@@ -257,9 +282,9 @@
+    "source": [
+     "## 4. Cluster statistics and viewer\n",
+     "\n",
+-    "Median and standard-deviation models are computed cell by cell over the members of each cluster. The section at $y$ = `IY` is an $x$–$z$ panel, at $x$ = `IX` a $y$–$z$ panel, the map at $z$ = `IZ` an $x$–$y$ panel. Here, `IY = 22` passes between the basement high and the pipes, and `IZ = 10` cuts the lenses, dykes, pipes and most highs.\n",
++    "Median and standard-deviation models are computed cell by cell over the members of each cluster. The sections, set in cell 1.2: the section at $y$ = `IY` is an $x$–$z$ panel, at $x$ = `IX` a $y$–$z$ panel, the map at $z$ = `IZ` an $x$–$y$ panel.\n",
+     "\n",
+-    "The viewer (4.3) is a self-contained HTML page: hovering over a point shows its model; tapping it, or choosing in the menu, shows its cluster. Clusters smaller than `MIN_SAMPLES`, and those beyond the `MAX_CLUSTERS` largest, are grey."
++    "The viewer (4.3) is a self-contained HTML page: hovering over a point shows its model; tapping it, or choosing in the menu, shows its cluster. Below the median, standard-deviation and representative models, it shows the entropy of the unit and the probability of a born unit over the members of the cluster, units being matched to the reference model of cell 1.2: the spread of the cluster in unit geometry, which the standard deviation mixes with the sampled densities, and where its models hold units absent from the prior. Clusters smaller than `MIN_SAMPLES`, and those beyond the `MAX_CLUSTERS` largest, are grey."
+    ]
+   },
+   {
+@@ -280,7 +305,6 @@
+    "outputs": [],
+    "source": [
+     "# 4.1  Plot median and standard-deviation tiles of the most different clusters\n",
+-    "IY, IX, IZ = 22, nx // 2, 10           # section indices: y = IY (x-z panel), x = IX (y-z panel), map at z = IZ\n",
+     "VMIN, VMAX = ch.density_range(core)    # common colour scale of the densities (0.5th and 99.5th percentiles)\n",
+     "\n",
+     "# the 12 most different clusters, each on its section with most structure\n",
+@@ -335,7 +359,8 @@
+     "MAX_CLUSTERS = None      # clusters coloured in the viewers, largest first (None = all; the others are grey)\n",
+     "\n",
+     "layout = cv.build_viewer(core, coords, labels, chain_id, iy=IY, ix=IX, iz=IZ, truth=truth, min_size=MIN_SAMPLES,\n",
+-    "                         max_clusters=MAX_CLUSTERS, vmin=VMIN, vmax=VMAX, title=f'{FILE_PREFIX}: clusters ({CLUSTERER})')\n",
++    "                         max_clusters=MAX_CLUSTERS, vmin=VMIN, vmax=VMAX, reference=ref,\n",
++    "                         title=f'{FILE_PREFIX}: clusters ({CLUSTERER})')\n",
+     "ch.show_viewer(layout, os.path.join(OUT_DIR, f'{FILE_PREFIX}_cluster_viewer_strings.html'), height=1150)"
+    ]
+   },
+@@ -352,7 +377,7 @@
+     "\n",
+     "where $\\mathbf{1}\\{\\cdot\\}$ is 1 when the condition holds and 0 otherwise, $P(k \\mid c)$ and $P(k)$ are the fractions of models holding motif $k$ in the cluster and in the ensemble (noise included), and $E_{kc}$ is the enrichment (Milo et al., 2002): $E_{kc} \\gg 1$ marks the motifs that characterise the cluster, $E_{kc} \\approx 0$ those it excludes. The clusters come from the features, not from the motifs, so that the enrichment is an independent reading of them. Topology classes (unit contacts and bodies per unit; Thiele et al., 2016b) are numbered by decreasing frequency.\n",
+     "\n",
+-    "Cell 5.1 takes the settings of the motif workflow (`motif_workflow_boulia_v4.ipynb`). Units are matched across models by overlap with the prior model of the generator (label switching; Stephens, 2000).\n",
++    "Cell 5.1 takes the settings of the motif workflow (`motif_workflow_boulia_v4.ipynb`). Units are matched across models by overlap with the reference model of cell 1.2, the prior model of the generator (label switching; Stephens, 2000).\n",
+     "\n",
+     "Cell 5.3 lists $P(k \\mid c)$ and the most frequent topology class of each cluster; the motif viewer (5.4) adds the motifs of each model, colouring by motif, and a heatmap of $E_{kc}$ (tap a row to select the cluster)."
+    ]
+@@ -376,7 +401,6 @@
+     "VMIN_VOXELS = 8          # volume floor: bodies with fewer cells are fragments (sampler noise)\n",
+     "MAX_BODIES = 5           # topology key: bodies per unit counted up to this value\n",
+     "ORDER = None             # stratigraphic order of the reference units, top -> bottom (None: by mean depth)\n",
+-    "MIN_UNIT_SHARE = 0.01    # reference units below this share of the grid are absorbed by their nearest unit\n",
+     "CELL_SIZES = (1.0, 1.0, 1.0)   # (dz, dy, dx); the synthetic cells are cubic\n",
+     "THR = dict()             # thresholds overriding ma.DEFAULTS, e.g. dict(c_min=1.5, amin_link=4)\n",
+     "UNIT_NAMES = {0: 'cover', 1: 'sediments', 2: 'basement'}   # names of the reference units (0 = top)\n",
+@@ -388,9 +412,9 @@
+    "id": "fa41251d",
+    "metadata": {},
+    "source": [
+-    "### 5.2  Reference model and motif table\n",
++    "### 5.2  Motif table\n",
+     "\n",
+-    "One row of motif counts per model."
++    "One row of motif counts per model, units being matched to the reference model of cell 1.2."
+    ]
+   },
+   {
+@@ -400,9 +424,7 @@
+    "metadata": {},
+    "outputs": [],
+    "source": [
+-    "# 5.2  Build the reference model, then count the motifs of each model\n",
+-    "ref = ch.reference(core, se.prior_model(), PADD, MIN_UNIT_SHARE)\n",
+-    "K = int(ref.max()) + 1                 # number of reference units; code K - 1 is the basement\n",
++    "# 5.2  Count the motifs of each model, units matched to the reference model of cell 1.2\n",
+     "kw = dict(vmin_voxels=VMIN_VOXELS, reference=ref, cell_sizes=CELL_SIZES, max_bodies=MAX_BODIES, order=ORDER, thr=THR)\n",
+     "vw = mp.Viewer(core, ref, unit_names=UNIT_NAMES, cell_sizes=CELL_SIZES)      # sections with units matched to ref\n",
+     "\n",
+@@ -454,7 +476,7 @@
+     "layout_m = cv.build_viewer(core, coords, labels, chain_id, iy=IY, ix=IX, iz=IZ, truth=truth, min_size=MIN_SAMPLES,\n",
+     "                           max_clusters=MAX_CLUSTERS, vmin=VMIN, vmax=VMAX, thumb_orient=VIEW_SECTION, orient=VIEW_SECTION,\n",
+     "                           motifs=df_motifs[VIEW_MOTIFS], topology=topo_class,\n",
+-    "                           extra=ch.viewer_extra(df_motifs, topo), tooltip_extra=['n_units', 'n_born'],\n",
++    "                           extra=ch.viewer_extra(df_motifs, topo), tooltip_extra=['n_units', 'n_born'], reference=ref,\n",
+     "                           title=f'{FILE_PREFIX}: clusters ({CLUSTERER}), motifs and topology')\n",
+     "ch.show_viewer(layout_m, os.path.join(OUT_DIR, f'{FILE_PREFIX}_cluster_viewer_motifs.html'), height=1600)"
+    ]
+diff --git a/modules/cluster_viewer.py b/modules/cluster_viewer.py
+index 36b7e09..85c720d 100644
+--- a/modules/cluster_viewer.py
++++ b/modules/cluster_viewer.py
+@@ -9,6 +9,14 @@ in the drop-down list (or tapped in the embedding), on a vertical section at
+ a fixed y (x-z panel), at a fixed x (y-z panel) or on a depth map (x-y panel).
+ A table lists the clusters with their size, chain composition and spread.
+ 
++A second row of panels gives, for the cluster chosen, the entropy of the unit and the probability of a born unit at
++each cell, computed over the members of the cluster, and the table gives their means over the cells: the spread of the
++cluster in unit geometry (the standard deviation of the densities also reflects the sampled densities) and where its
++models hold born units. The units of every model are matched to a reference (ensemble_indicators.canonical_ensemble):
++the reference codes passed as `reference` (e.g. the prior model, as for the motifs), the unit codes passed as `codes`,
++or by default a modal reference built from the ensemble (motif_analysis.modal_reference), whose units are those present
++in most models; born units are then the units absent from it. unit_maps=False leaves these panels out.
++
+ With a motif table (motifs=, from motif_analysis.motif_table) the page also gives, for each model, its motifs
+ in the hover and a 'colour by motif' menu, and for each cluster P(motif | cluster), the enrichment
+ E = P(motif | cluster) / P(motif) in the information panel, a heatmap of E (clusters x motifs) and E columns in the
+@@ -38,7 +46,7 @@ from bokeh.layouts import column, row
+ from bokeh.models import (ColumnDataSource, HoverTool, TapTool, CustomJS, Select, RadioButtonGroup, Div,
+                           LinearColorMapper, ColorBar, DataTable, TableColumn, NumberFormatter,
+                           CustomJSTickFormatter, Range1d, FixedTicker)
+-from bokeh.palettes import Viridis256, Magma256, RdBu11
++from bokeh.palettes import Viridis256, Magma256, Plasma256, RdBu11
+ from bokeh.plotting import figure
+ from bokeh.resources import INLINE
+ 
+@@ -89,12 +97,15 @@ def _image_figure(title, w_cells, h_cells, mapper, orient, width=320, unit=None)
+     return p, src
+ 
+ 
+-def _guide_html(thumb_where, partial_thumbs, has_chain, has_m):
++def _guide_html(thumb_where, partial_thumbs, has_chain, has_m, has_u=False):
+     """HTML of the short 'How to use' note placed under the section panels."""
+     items = [f'<b>Hover</b> over a point to see its model on the {thumb_where}'
+              + (' (grey box: no preview stored)' if partial_thumbs else '') + '.',
+              '<b>Click</b> a point to select its cluster: its members are highlighted and the panels above show '
+              'this cluster. The drop-down list does the same.',
++             *(['<b>Entropy and born units</b> (second row): entropy of the unit at each cell over the members of '
++                'the cluster (0 where they all hold the same unit), and fraction of the members holding a born unit '
++                'there.'] if has_u else []),
+              '<b>Zoom</b> with the mouse wheel, <b>pan</b> by dragging; the toolbar has a box zoom and a reset button.']
+     c = []
+     if has_chain:
+@@ -113,7 +124,8 @@ def _guide_html(thumb_where, partial_thumbs, has_chain, has_m):
+ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None, truth=None,
+                  min_size=5, max_clusters=60, vmin=None, vmax=None, vmax_std=None, thumb_orient='y', orient='y',
+                  title='Cluster viewer', with_table=True, max_thumbs=3000, seed=0,
+-                 motifs=None, topology=None, extra=None, tooltip_extra=None, unit='kg/m³', guide=True):
++                 motifs=None, topology=None, extra=None, tooltip_extra=None, unit='kg/m³', guide=True,
++                 codes=None, n_classes=None, vmax_entropy=None, reference=None, unit_maps=True):
+     """
+     Build the Bokeh layout of the viewer.
+ 
+@@ -138,6 +150,16 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
+         (the standard deviation has the unit of the model); None = no unit.
+     guide : True = short 'How to use' note under the section panels (the colour-by item only when that menu
+         exists), False = none, str = your own HTML in its place.
++    codes, n_classes : unit codes of the models (nz, ny, nx, N) and number of classes, from
++        ensemble_indicators.canonical_ensemble (reference units 0 to n_classes - 2, born units above, grouped in
++        one class). When given, a second row of panels shows, for the cluster chosen, the entropy of the unit
++        H(x) = -sum_k p_k(x) ln p_k(x) and the probability of a born unit p_born(x), p_k(x) being the fraction of
++        the members of the cluster whose cell x belongs to class k; the table and the information panel give the
++        means of H and p_born over the cells. vmax_entropy: top of the entropy colour scale (99th percentile of
++        the panels if None, at most ln(n_classes)); p_born is drawn from 0 to 1.
++    reference : reference codes or reference model (nz, ny, nx), used to compute the unit codes when codes is None;
++        None = modal reference built from the ensemble (motif_analysis.modal_reference, 200 models).
++    unit_maps : False = no entropy and born-unit panels when codes is None (the viewer of the earlier versions).
+     """
+     nz, ny, nx, N = core.shape
+     orient0 = orient
+@@ -171,11 +193,31 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
+         extra = pd.DataFrame(extra).reset_index(drop=True)
+         assert len(extra) == N, f"extra has {len(extra)} rows, the ensemble {N} models"
+         extra_rows = []
++    if codes is None and unit_maps:      # unit codes matched to the reference, or to a modal reference
++        import ensemble_indicators as ei
++        from time import time
++        t0 = time()
++        if reference is None:
++            import motif_analysis as ma
++            reference = ma.modal_reference(core, n_sample=min(200, N))
++            what = 'modal reference built from the ensemble'
++        else:
++            what = 'reference given'
++        codes, n_classes = ei.canonical_ensemble(core, reference)
++        print(f"viewer: units matched to the {what} ({n_classes - 1} units and the born class) in {time() - t0:.0f} s")
++    has_u = codes is not None
++    if has_u:
++        import ensemble_indicators as ei
++        assert codes.shape == core.shape, f"codes {codes.shape} and core {core.shape} differ"
++        if n_classes is None:
++            raise ValueError("n_classes is needed with codes (second output of canonical_ensemble)")
++    keys = ['med', 'std', 'rep'] + (['ent', 'born'] if has_u else [])
+ 
+     # --- per-cluster statistics: sections of the median, std and representative models ---
+-    stats = {k: [] for k in ('cluster', 'n', 'members', 'info', 'rep_index', 'mean_std')}
++    stats = {k: [] for k in ('cluster', 'n', 'members', 'info', 'rep_index', 'mean_std')
++             + (('mean_ent', 'born_vol') if has_u else ())}
+     for o, _ in _ORIENTS:
+-        for s in ('med', 'std', 'rep'):
++        for s in keys:
+             stats[f'{s}_{o}'] = []
+     chains = np.unique(chain_id) if chain_id is not None else []
+     stacks = {o: section_stack(core, o, iy, ix, iz) for o, _ in _ORIENTS}   # the three sections of every model
+@@ -197,6 +239,17 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
+         if chain_id is not None:
+             info.append('chains: ' + ', '.join(f'{c} {np.mean(chain_id[idx] == c):.0%}' for c in chains))
+         info.append(f'mean voxel std: {std.mean():.1f}')
++        if has_u:                     # class frequencies over the members: entropy and probability of a born unit
++            pu = ei.class_frequencies(codes[..., idx], n_classes)[0][0]
++            H, pb = ei.entropy_map(pu).astype(np.float32), pu[-1]
++            stats['mean_ent'].append(float(H.mean()))
++            stats['born_vol'].append(float(pb.mean()))
++            for o, _ in _ORIENTS:
++                for s_, vol in (('ent', H), ('born', pb)):
++                    sec = np.asarray(section(vol, o, iy, ix, iz), dtype=np.float32)
++                    stats[f'{s_}_{o}'].append(sec[::-1] if o != 'z' else sec)
++            info.append(f'mean unit entropy: {H.mean():.2f} nats (at most ln {n_classes} = {np.log(n_classes):.2f}); '
++                        f'born units: {pb.mean():.1%} of the cells on average')
+         if truth is not None:
+             flags = [c for c in ('high', 'lens', 'dyke', 'pipe') if c in truth]
+             info.append('bodies: ' + ', '.join(f'{c} {np.mean(truth[c].values[idx].astype(bool)):.0%}' for c in flags))
+@@ -228,6 +281,9 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
+     stats_src = ColumnDataSource(data=stats)
+     if vmax_std is None:
+         vmax_std = float(max(np.percentile(a, 99) for a in stats['std_y'] + stats['std_x'])) or 1.0
++    if has_u and vmax_entropy is None:
++        vmax_entropy = min(float(max(np.percentile(a, 99) for a in stats['ent_y'] + stats['ent_x'] + stats['ent_z'])),
++                           float(np.log(n_classes))) or float(np.log(n_classes))
+ 
+     # --- embedding scatter with thumbnails ---
+     if max_thumbs is None or N <= max_thumbs:
+@@ -302,6 +358,9 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
+     # --- image panels ---
+     mapper = LinearColorMapper(palette=Viridis256, low=vmin, high=vmax)
+     mapper_std = LinearColorMapper(palette=Magma256, low=0, high=vmax_std)
++    if has_u:
++        mapper_ent = LinearColorMapper(palette=Magma256, low=0, high=vmax_entropy)
++        mapper_born = LinearColorMapper(palette=Plasma256, low=0, high=1)
+     dims = {'y': (nx, nz), 'x': (ny, nz), 'z': (nx, ny)}
+     panels, img_srcs = {}, {}
+     for o, _ in _ORIENTS:
+@@ -311,6 +370,11 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
+                         ('rep', 'representative model', mapper)):
+             panels[o][s], img_srcs[o][s] = _image_figure(t, w, h, m, o, unit=unit)
+             panels[o][s].visible = (o == orient0)
++        if has_u:
++            for s, t, m, u in (('ent', 'entropy of the unit', mapper_ent, 'nats'),
++                               ('born', 'probability of a born unit', mapper_born, 'P')):
++                panels[o][s], img_srcs[o][s] = _image_figure(t, w, h, m, o, unit=u)
++                panels[o][s].visible = (o == orient0)
+     info_div = Div(text=stats['info'][0], width=560)
+     select = Select(title='Cluster (sorted by size)', value='0',
+                     options=[(str(k), f'cluster {cl}  (n = {n})') for k, (cl, n) in enumerate(zip(ids, stats['n']))],
+@@ -319,28 +383,27 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
+ 
+     flat = {f'src_{s}_{o}': img_srcs[o][s] for o in img_srcs for s in img_srcs[o]}
+     flat.update({f'panel_{s}_{o}': panels[o][s] for o in panels for s in panels[o]})
++    def _js_dict(prefix):            # {y: {med: src_med_y, ...}, x: {...}, z: {...}} over the panels shown
++        return '{' + ', '.join(o + ': {' + ', '.join(f'{s}: {prefix}_{s}_{o}' for s in keys) + '}'
++                               for o, _ in _ORIENTS) + '}'
+     cb = CustomJS(args=dict(stats=stats_src, select=select, orient=orient, sc=sc_src, info=info_div,
+-                            orients=[o for o, _ in _ORIENTS], **flat),
++                            orients=[o for o, _ in _ORIENTS], keys=keys, **flat),
+                   code="""
+-        const srcs = {y: {med: src_med_y, std: src_std_y, rep: src_rep_y},
+-                      x: {med: src_med_x, std: src_std_x, rep: src_rep_x},
+-                      z: {med: src_med_z, std: src_std_z, rep: src_rep_z}};
+-        const panels = {y: {med: panel_med_y, std: panel_std_y, rep: panel_rep_y},
+-                        x: {med: panel_med_x, std: panel_std_x, rep: panel_rep_x},
+-                        z: {med: panel_med_z, std: panel_std_z, rep: panel_rep_z}};
++        const srcs = SRCS;
++        const panels = PANELS;
+         const k = parseInt(select.value);
+         const o = orients[orient.active];
+         for (const oo of orients) {
+-            for (const s of ['med', 'std', 'rep']) {
++            for (const s of keys) {
+                 panels[oo][s].visible = (oo === o);
+             }
+         }
+-        for (const s of ['med', 'std', 'rep']) {
++        for (const s of keys) {
+             srcs[o][s].data = {image: [stats.data[s + '_' + o][k]]};
+         }
+         info.text = stats.data['info'][k];
+         sc.selected.indices = Array.from(stats.data['members'][k]);
+-    """)
++    """.replace('SRCS', _js_dict('src')).replace('PANELS', _js_dict('panel')))
+     select.js_on_change('value', cb)
+     orient.js_on_change('active', cb)
+     # tapping one point selects its cluster (a single selected index that belongs to a shown cluster)
+@@ -408,7 +471,14 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
+     tab = {'cluster': ids, 'n': stats['n'],
+            'mean_voxel_std': stats['mean_std']}
+     cols = [TableColumn(field='cluster', title='cluster', width=60), TableColumn(field='n', title='n', width=50),
+-            TableColumn(field='mean_voxel_std', title='mean voxel std', formatter=NumberFormatter(format='0.0'))]
++            TableColumn(field='mean_voxel_std', title='mean voxel std', formatter=NumberFormatter(format='0.0'),
++                        width=100)]
++    if has_u:
++        tab['mean_entropy'], tab['born_volume'] = stats['mean_ent'], stats['born_vol']
++        cols += [TableColumn(field='mean_entropy', title='mean entropy', formatter=NumberFormatter(format='0.00'),
++                             width=90),
++                 TableColumn(field='born_volume', title='born volume', formatter=NumberFormatter(format='0.0%'),
++                             width=85)]
+     for c in chains:
+         tab[f'frac_{c}'] = [float(np.mean(chain_id[labels == cl] == c)) for cl in ids]
+         cols.append(TableColumn(field=f'frac_{c}', title=f'{c}', formatter=NumberFormatter(format='0.00')))
+@@ -416,7 +486,7 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
+         for c in [c for c in ('high', 'lens', 'dyke', 'pipe') if c in truth]:
+             tab[f'P_{c}'] = [float(np.mean(truth[c].values[labels == cl].astype(bool))) for cl in ids]
+             cols.append(TableColumn(field=f'P_{c}', title=f'P({c})', formatter=NumberFormatter(format='0.00')))
+-    wide = has_m or topology is not None or extra is not None
++    wide = has_m or topology is not None or extra is not None or has_u
+     if has_m:
+         for j, m in enumerate(mnames):
+             tab[f'E_{j}'] = Em[:, j]
+@@ -450,10 +520,11 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
+         where = {'y': f'vertical section at y = {iy}', 'x': f'vertical section at x = {ix}',
+                  'z': f'depth map at z = {iz}'}[thumb_orient]
+         text = guide if isinstance(guide, str) else _guide_html(
+-            where, len(with_thumb) < N, chain_id is not None and len(chains) > 1, has_m)
++            where, len(with_thumb) < N, chain_id is not None and len(chains) > 1, has_m, has_u)
+         guide_div = [Div(text=text, width=640, styles={'margin-top': '10px'})]
+     right = column(row(select, orient), info_div,
+-                   *[row(panels[o]['med'], panels[o]['std'], panels[o]['rep']) for o, _ in _ORIENTS], *guide_div)
++                   *[row(panels[o]['med'], panels[o]['std'], panels[o]['rep']) for o, _ in _ORIENTS],
++                   *([row(panels[o]['ent'], panels[o]['born']) for o, _ in _ORIENTS] if has_u else []), *guide_div)
+     left = ([row(cby, legend_div)] if cby is not None else []) + [p_emb] + ([p_hm] if p_hm is not None else []) \
+         + ([table] if with_table else [])
+     top = [header]
+@@ -461,7 +532,7 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
+ 
+     # initial state: first cluster, y section
+     k0 = 0
+-    for s in ('med', 'std', 'rep'):
++    for s in keys:
+         img_srcs[orient0][s].data = dict(image=[stats[f'{s}_{orient0}'][k0]])
+     sc_src.selected.indices = stats['members'][k0]
+     if has_m:
+diff --git a/technical_note.md b/technical_note.md
+index 7c4b84c..6d03cba 100644
+--- a/technical_note.md
++++ b/technical_note.md
+@@ -116,13 +116,13 @@ where m\_i(**x**) is the density of model i at cell **x**, |c| the number of mem
+ 
+ **Largest clusters (cell 4.2).** Median, standard-deviation and representative models of the `N_SHOW` largest clusters, on the section y = `IY` and the map z = `IZ`.
+ 
+-**Viewer (cell 4.3).** A self-contained HTML page (Bokeh), also saved in `outputs/`: hovering over a point of the embedding shows the section of its model, its cluster, its chain and, for the synthetic ensemble, the bodies drawn in it; tapping a point, or choosing in the menu, shows the median, standard-deviation and representative models of its cluster; the page also holds the cluster table. Clusters smaller than `MIN_SAMPLES`, and those beyond the `MAX_CLUSTERS` largest, are grey.
++**Viewer (cell 4.3).** A self-contained HTML page (Bokeh), also saved in `outputs/`: hovering over a point of the embedding shows the section of its model, its cluster, its chain and, for the synthetic ensemble, the bodies drawn in it; tapping a point, or choosing in the menu, shows the median, standard-deviation and representative models of its cluster; the page also holds the cluster table. Clusters smaller than `MIN_SAMPLES`, and those beyond the `MAX_CLUSTERS` largest, are grey. Below these panels, the entropy of the unit, H(**x**) = −Σ\_k p\_k(**x**) ln p\_k(**x**), and the probability of a born unit, p\_born(**x**), are computed over the members of the cluster, p\_k(**x**) being the fraction of them whose cell **x** belongs to reference unit k (or to a born unit), with units matched to the reference model of cell 1.2 (see Section 5); the cluster table gives their means over the cells. H is 0 where all members hold the same unit and measures the spread of the cluster in unit geometry, which s\_c mixes with the sampled densities (Wellmann & Regenauer-Lieb 2012; Pirot et al. 2022).
+ 
+ ## 5. Motifs and topology of the clusters
+ 
+ Independently of the features, each model is reduced to a graph of its bodies and to a row of motif counts (`motif_analysis.py`); comparing motif frequencies inside and outside a cluster names the cluster in geological terms (right-hand route of Fig. 1).
+ 
+-**Unit identity across models (cell 5.2).** Motifs need to know which unit is the cover, which the basement and which units were born, but sampled densities cannot be compared across models (label switching; Stephens 2000; Jasra et al. 2005). Each model is matched to a reference model r: the prior model of the generator (synthetic) or of the sampler (`data/boulia_prior_model.npy`, oriented on the grid of `core` automatically; a modal stand-in is built without it). Reference units are numbered k = 0, …, K − 1 by increasing mean depth, so that 0 is the cover and K − 1 the basement; units occupying less than `MIN_UNIT_SHARE` (1 %) of the grid are absorbed by their nearest unit. For a model with distinct density values v,
++**Unit identity across models (cell 1.2).** The viewers (cells 4.3 and 5.4) and the motifs need to know which unit is the cover, which the basement and which units were born, but sampled densities cannot be compared across models (label switching; Stephens 2000; Jasra et al. 2005). Each model is matched to a reference model r: the prior model of the generator (synthetic) or of the sampler (`data/boulia_prior_model.npy`, oriented on the grid of `core` automatically; a modal stand-in is built without it). Reference units are numbered k = 0, …, K − 1 by increasing mean depth, so that 0 is the cover and K − 1 the basement; units occupying less than `MIN_UNIT_SHARE` (1 %) of the grid are absorbed by their nearest unit. For a model with distinct density values v,
+ 
+ ```math
+ T_{vk} = \#\{\mathbf{x} : m(\mathbf{x}) = v,\ r(\mathbf{x}) = k\}
+@@ -235,6 +235,7 @@ where r\_j is a value regarded as fully typical, so that μ\_j = 0 at the thresh
+ - McInnes, L., Healy, J. & Melville, J., 2018. UMAP: Uniform Manifold Approximation and Projection for dimension reduction, arXiv:1802.03426.
+ - Milo, R., Shen-Orr, S., Itzkovitz, S., Kashtan, N., Chklovskii, D. & Alon, U., 2002. Network motifs: simple building blocks of complex networks, *Science*, 298(5594), 824–827.
+ - Osher, S. & Sethian, J.A., 1988. Fronts propagating with curvature-dependent speed: algorithms based on Hamilton–Jacobi formulations, *J. Comput. Phys.*, 79(1), 12–49.
++- Pirot, G., Joshi, R., Giraud, J., Lindsay, M.D. & Jessell, M.W., 2022. loopUI-0.1: indicators to support needs and practices in 3D geological modelling uncertainty quantification, *Geosci. Model Dev.*, 15, 4689–4708, doi:10.5194/gmd-15-4689-2022.
+ - Rashidifard, M., Giraud, J., Lindsay, M. & Jessell, M., 2024. Cooperative geophysical inversion integrated with 3-D geological modelling in the Boulia region, QLD, *Geophys. J. Int.*, 238, 860–880.
+ - Robert, C.P. & Casella, G., 2004. *Monte Carlo Statistical Methods*, 2nd edn, Springer.
+ - Rosenfeld, A. & Pfaltz, J.L., 1966. Sequential operations in digital picture processing, *J. ACM*, 13(4), 471–494.
+@@ -243,5 +244,6 @@ where r\_j is a value regarded as fully typical, so that μ\_j = 0 at the thresh
+ - Stephens, M., 2000. Dealing with label switching in mixture models, *J. R. Stat. Soc. B*, 62(4), 795–809.
+ - Thiele, S.T., Jessell, M.W., Lindsay, M., Ogarko, V., Wellmann, J.F. & Pakyuz-Charrier, E., 2016a. The topology of geology 1: Topological analysis, *J. Struct. Geol.*, 91, 27–38.
+ - Thiele, S.T., Jessell, M.W., Lindsay, M., Wellmann, J.F. & Pakyuz-Charrier, E., 2016b. The topology of geology 2: Topological uncertainty, *J. Struct. Geol.*, 91, 74–87.
++- Wellmann, J.F. & Regenauer-Lieb, K., 2012. Uncertainties have a meaning: information entropy as a quality measure for 3-D geological models, *Tectonophysics*, 526–529, 207–216.
+ - Woodcock, N.H., 1977. Specification of fabric shapes using an eigenvalue method, *Geol. Soc. Am. Bull.*, 88(9), 1231–1236.
+ - Zadeh, L.A., 1965. Fuzzy sets, *Information and Control*, 8(3), 338–353.
+diff --git a/modules/ensemble_indicators.py b/modules/ensemble_indicators.py
+new file mode 100644
+index 0000000..2c31f3d
+--- /dev/null
++++ b/modules/ensemble_indicators.py
+@@ -0,0 +1,868 @@
++"""
++Ensemble indicators for posterior ensembles of 3D labelled models: cell-wise
++uncertainty maps, comparison of groups of models cell by cell, connectivity,
++directional variograms and per-model descriptors. Adapted from loopUI
++(Pirot et al., 2022) to trans-dimensional (trans-D) level-set ensembles.
++
++Credit
++------
++The indicators follow loopUI-0.1 (Pirot, Joshi, Giraud, Lindsay & Jessell,
++2022; https://github.com/Loop3D/loopUI, MIT licence):
++
++    this module                       loopUI-0.1 (loopui.py)
++    -------------------------------   -------------------------------------------
++    cardinality_map                   cardinality
++    entropy_map                       entropy
++    js_divergence_map                 kldiv(..., divtype='js'), jsdist_hist
++    connectivity_gamma, gamma_curves  continuous_pct_connectivity
++    lag_statistics: tau_k(h)          indicator_lag_connectivity
++    lag_statistics: gamma_k(h)        experimental_variogram (categorical)
++    block_distance_correlation        comparison of indicators (ui-9-comparison)
++
++as does the distinction between local indicators (one value per cell, cost
++linear in the number of models N) and global ones (one value per model or per
++pair of models). The functions are re-implemented, not copied from loopUI, and
++differ from it in five respects that matter for posterior ensembles:
++
++1. Unit identity. loopUI takes the distinct values of a voxet as categories,
++   which assumes that the models share their stratigraphy. In trans-D
++   ensembles the unit densities are sampled, so that one unit carries a
++   different value in each model, and units are born and die. The indicators
++   are computed on canonical unit codes instead: each model is matched to a
++   reference model by motif_analysis.canonical_labels (label switching;
++   Stephens, 2000), and all born units are grouped in one class
++   (canonical_ensemble).
++2. Groups. Cell-wise indicators are computed per group of models (chain,
++   cluster, prior or posterior ensemble), and groups are compared cell by cell
++   (js_divergence_map, kl_divergence_map) rather than model by model.
++3. Per-model descriptors instead of pairwise distances. loopUI compares models
++   two by two, N(N - 1)/2 comparisons (about 2e6 for N = 2000). Here the
++   connectivity and variogram curves are computed once per model and
++   concatenated in a descriptor vector (descriptor_table), at a cost linear
++   in N; the vectors can be appended to the features of ensemble_features and
++   embedded or clustered with them.
++4. Exact directional statistics. loopUI draws random pairs of cells and pools
++   all directions. Here every pair of cells at lag h along one grid axis is
++   used (no sampling), separately along depth, y and x: layered models are
++   anisotropic, and an omnidirectional curve averages the vertical and lateral
++   behaviours.
++5. Shared thresholds. loopUI thresholds each continuous model at its own
++   percentiles; gamma_curves uses thresholds common to all models, in density
++   units, so that the curves of all models describe the same sets of cells
++   (e.g. "denser than 2900 kg/m3").
++
++Not carried over: the multiple-point histogram and wavelet distances overlap
++with the fixed-kernel encoder of ensemble_features and with the Haralick
++features, and the former needs two k-means fits per pair of models; the
++topological distances of loopUI work on the unit-level adjacency matrix,
++which the topology key and the body graph of motif_analysis already contain.
++
++Conventions (as in motif_analysis.py)
++-------------------------------------
++- models: ndarray (nz, ny, nx, N) of densities, model i = models[..., i];
++  axis 0 is depth, index 0 at the top.
++- codes: ndarray (nz, ny, nx, N) of canonical codes (uint8): 0..K-1 are the
++  reference units ordered by increasing mean depth (0 = top, K-1 = deepest),
++  codes >= K the born units of each model (distinct within a model, not
++  across models). Every function groups the codes >= K in one class K, the
++  born class, so that n_classes = K + 1; within a model, the bodies of
++  different born units remain distinct, as in motif_analysis.
++- p: class frequencies with the class axis fourth from the end,
++  (n_classes, nz, ny, nx) for one group or (G, n_classes, nz, ny, nx) for G
++  groups; p[..., k, iz, iy, ix] is the fraction of the models of a group in
++  which cell (iz, iy, ix) belongs to class k.
++- 6-connectivity (shared faces) for bodies and connected components.
++- Entropies and divergences in nats (natural logarithm).
++
++Contents
++--------
++0. canonical_ensemble                      codes of every model
++1. class_counts, class_frequencies,        per-group frequencies of each class at each cell,
++   pooled_frequencies                      and of all groups together
++   entropy_map, cardinality_map            local uncertainty (loopUI)
++   js_divergence_map, js_null_level        cell-wise disagreement between groups
++   effective_sample_size,                  effective sample size of a sequence, and of each chain
++   chain_effective_sizes                   (for the reference level of the disagreement)
++   kl_divergence_map                       cell-wise information gain, prior -> posterior
++   group_summary                           one row of summary statistics per group
++2. connectivity_gamma, gamma_curves        connectivity of density sets (percolation)
++   class_densities                         density ranges of the classes, to place thresholds
++   connected_between, box                  hypothesis "regions A and B are connected"
++3. lag_statistics, class_gamma             directional indicator variograms and
++                                           connectivity functions of the classes
++4. descriptor_table, descriptor_names      per-model descriptor vectors
++5. block_distance_correlation              redundancy between descriptor blocks
++6. plot_sections                           map and two sections of a cell-wise volume
++
++Usage
++-----
++    import ensemble_indicators as ei
++    codes, n_cl = ei.canonical_ensemble(core, ref)                  # ref: reference codes
++    p, names, n = ei.class_frequencies(codes, n_cl, groups=chain_id)
++    H = ei.entropy_map(p)                                           # (G, nz, ny, nx)
++    p_all = ei.pooled_frequencies(p, n)                             # all chains together
++    neff = ei.chain_effective_sizes(codes, n_cl, chain_id, reference=ref)  # N_eff of each chain
++    JS = ei.js_divergence_map(p, weights=n)                         # chains disagree where JS >> JS0
++    JS0 = ei.js_null_level(p_all, n, neff['N_eff'])
++    g, frac = ei.gamma_curves(core, thresholds=[2700, 2850, 2950])  # (N, T)
++    X = ei.descriptor_table(codes, n_cl)                            # DataFrame (N, F)
++
++References
++----------
++Geyer, C.J., 1992. Practical Markov chain Monte Carlo, Stat. Sci., 7(4), 473-483.
++Goovaerts, P., 1997. Geostatistics for Natural Resources Evaluation, Oxford
++    University Press.
++Krichevsky, R. & Trofimov, V., 1981. The performance of universal encoding,
++    IEEE Trans. Inf. Theory, 27(2), 199-207.
++Kullback, S. & Leibler, R.A., 1951. On information and sufficiency, Ann. Math.
++    Stat., 22(1), 79-86.
++Lin, J., 1991. Divergence measures based on the Shannon entropy, IEEE Trans.
++    Inf. Theory, 37(1), 145-151.
++Lindley, D.V., 1956. On a measure of the information provided by an
++    experiment, Ann. Math. Stat., 27(4), 986-1005.
++Mantel, N., 1967. The detection of disease clustering and a generalized
++    regression approach, Cancer Res., 27(2), 209-220.
++Pirot, G., Joshi, R., Giraud, J., Lindsay, M.D. & Jessell, M.W., 2022.
++    loopUI-0.1: indicators to support needs and practices in 3D geological
++    modelling uncertainty quantification, Geosci. Model Dev., 15, 4689-4708,
++    doi:10.5194/gmd-15-4689-2022.
++Renard, P. & Allard, D., 2013. Connectivity metrics for subsurface flow and
++    transport, Adv. Water Resour., 51, 168-196.
++Shannon, C.E., 1948. A mathematical theory of communication, Bell Syst. Tech.
++    J., 27(3), 379-423.
++Silversmith, W., 2021. cc3d: connected components on multilabel 3D images,
++    software, https://github.com/seung-lab/connected-components-3d.
++Stephens, M., 2000. Dealing with label switching in mixture models, J. R.
++    Stat. Soc. B, 62(4), 795-809.
++Wellmann, J.F. & Regenauer-Lieb, K., 2012. Uncertainties have a meaning:
++    information entropy as a quality measure for 3-D geological models,
++    Tectonophysics, 526-529, 207-216.
++Wilks, S.S., 1938. The large-sample distribution of the likelihood ratio for
++    testing composite hypotheses, Ann. Math. Stat., 9(1), 60-62.
++"""
++
++from __future__ import annotations
++
++import numpy as np
++import pandas as pd
++from joblib import Parallel, delayed
++
++try:
++    import cc3d
++except ImportError:          # scipy fallback in _label (slower)
++    cc3d = None
++
++AXES = 'zyx'                 # names of the grid axes in the descriptor names
++
++
++def _bounds(n, batch):
++    return [(i, min(i + batch, n)) for i in range(0, n, batch)]
++
++
++def _label(volume):
++    """
++    6-connected components of a non-negative integer volume, 0 = background. Components never span two
++    values, so that one call labels the bodies of all the classes of a model. Returns int64 labels, 0 for
++    the background, 1..n for the components.
++    """
++    if cc3d is not None:
++        return cc3d.connected_components(volume, connectivity=6).astype(np.int64, copy=False)
++    from scipy import ndimage
++    out, n = np.zeros(volume.shape, np.int64), 0
++    for v in np.unique(volume):
++        if v:
++            lab, k = ndimage.label(volume == v)            # default structure: 6-connectivity
++            out[lab > 0] = lab[lab > 0] + n
++            n += k
++    return out
++
++
++# ---------------------------------------------------------------------------
++# 0. Canonical codes
++# ---------------------------------------------------------------------------
++def _codes_batch(models, ref, K):
++    import motif_analysis as ma
++    out = np.empty(models.shape, np.uint8)
++    for i in range(models.shape[-1]):
++        out[..., i] = np.minimum(ma.canonical_labels(models[..., i], ref), 255)
++    return out
++
++
++def canonical_ensemble(models, reference, n_jobs=-1, batch=50):
++    """
++    Canonical unit codes of every model of an ensemble.
++
++    Parameters
++    ----------
++    models : (nz, ny, nx, N) ensemble (densities).
++    reference : reference model, or its codes from motif_analysis.reference_codes (same grid).
++
++    Returns
++    -------
++    codes : (nz, ny, nx, N) uint8. 0..K-1: reference units, by increasing mean depth (0 = top,
++        K-1 = deepest), as in motif_analysis; K, K+1, ...: the born units of each model (more than
++        255 - K born units in one model are merged in code 255). The identity of born units cannot be
++        followed from one model to the next: the indicators group them in one class K.
++    n_classes : K + 1 (reference units and the born class).
++
++    Memory: one byte per cell and model (e.g. 157 MB for 2000 models of 36 x 42 x 52 cells).
++
++    References
++    ----------
++    Unit matching by spatial overlap (motif_analysis.canonical_labels), a solution of the
++    label-switching problem of MCMC (Stephens, 2000).
++    """
++    import motif_analysis as ma
++    ref = ma.reference_codes(reference)
++    K = int(ref.max()) + 1
++    if K > 254:
++        raise ValueError(f"{K} reference units: uint8 codes hold at most 254")
++    N = models.shape[-1]
++    codes = np.empty(models.shape, np.uint8)
++    bounds = _bounds(N, batch)
++    res = Parallel(n_jobs=n_jobs, max_nbytes=None, return_as='generator')(
++        delayed(_codes_batch)(np.ascontiguousarray(models[..., i0:i1]), ref, K) for i0, i1 in bounds)
++    for (i0, i1), c in zip(bounds, res):
++        codes[..., i0:i1] = c
++    return codes, K + 1
++
++
++# ---------------------------------------------------------------------------
++# 1. Cell-wise indicators
++# ---------------------------------------------------------------------------
++def class_counts(codes, n_classes, groups=None):
++    """
++    Number of models of each group in which each cell belongs to each class.
++
++    Parameters
++    ----------
++    codes : (nz, ny, nx, N) integer codes; codes >= n_classes - 1 are counted in the last class (born).
++    groups : (N,) labels (chain, cluster, ...), or None for one group 'all'.
++
++    Returns
++    -------
++    counts : (G, n_classes, nz, ny, nx) int32.
++    names : (G,) group labels, sorted.
++    n : (G,) number of models per group.
++
++    One bincount per depth slice, so that the extra memory is one int64 index per cell of a slice and model.
++    """
++    nz, ny, nx, N = codes.shape
++    if groups is None:
++        names, gi = np.array(['all']), np.zeros(N, np.int64)
++    else:
++        names, gi = np.unique(np.asarray(groups), return_inverse=True)
++        gi = gi.reshape(-1).astype(np.int64)
++    G, nc = len(names), ny * nx
++    n = np.bincount(gi, minlength=G)
++    counts = np.empty((G, n_classes, nz, ny, nx), np.int32)
++    off = gi * n_classes                                  # (N,)
++    cell = np.arange(nc, dtype=np.int64)[:, None]         # (nc, 1)
++    for z in range(nz):
++        c = np.minimum(np.asarray(codes[z]).reshape(nc, N), n_classes - 1)
++        key = (off + c) * nc + cell                       # ((group, class), cell), row-major
++        counts[:, :, z] = np.bincount(key.ravel(), minlength=G * n_classes * nc).reshape(G, n_classes, ny, nx)
++    return counts, names, n
++
++
++def class_frequencies(codes, n_classes, groups=None):
++    """
++    Frequency p_k(x) of each class k at each cell x, per group: the fraction of the models of the group in
++    which x belongs to class k (Wellmann & Regenauer-Lieb, 2012). For a posterior ensemble, p_k(x) estimates
++    P(x in unit k | d). Returns (p (G, n_classes, nz, ny, nx) float32, names, n) as class_counts.
++    """
++    counts, names, n = class_counts(codes, n_classes, groups)
++    p = counts.astype(np.float32)
++    p /= np.maximum(n, 1).astype(np.float32)[:, None, None, None, None]
++    return p, names, n
++
++
++def pooled_frequencies(p, n):
++    """
++    Frequencies of all the models together from those of G groups: sum_g (n_g / N) p_g, with n_g the number
++    of models of group g and N = sum_g n_g. p: (G, n_classes, nz, ny, nx), n: (G,), as from class_frequencies.
++    Returns (n_classes, nz, ny, nx) float32, equal to class_frequencies without groups.
++    """
++    n = np.asarray(n, dtype=np.float64)
++    return np.tensordot(n / n.sum(), np.asarray(p, dtype=np.float64), axes=(0, 0)).astype(np.float32)
++
++
++def entropy_map(p):
++    """
++    Shannon entropy of the class frequencies at each cell (loopUI `entropy`; Shannon, 1948; Wellmann &
++    Regenauer-Lieb, 2012):
++
++        H(x) = - sum_k p_k(x) ln p_k(x),   with 0 ln 0 = 0,
++
++    where p_k(x) is the frequency of class k at cell x (class axis fourth from the end of p). H = 0 where all
++    models agree, ln(n_classes) at most. In nats; divide by ln 2 for bits.
++    """
++    p = np.asarray(p, dtype=np.float64)
++    t = np.zeros_like(p)
++    m = p > 0
++    t[m] = p[m] * np.log(p[m])
++    return -t.sum(axis=-4)
++
++
++def cardinality_map(p, p_min=0.0):
++    """
++    Number of classes with frequency above p_min at each cell (loopUI `cardinality`, p_min = 0). With
++    p_min = 0 the cardinality grows with the number of models, since a single model is enough to add a
++    class; p_min > 0 (e.g. 0.05) counts only the classes that a sizeable part of the ensemble supports.
++    """
++    return (np.asarray(p) > p_min).sum(axis=-4)
++
++
++def js_divergence_map(p, weights=None):
++    """
++    Generalised Jensen-Shannon divergence between the class frequencies of G groups at each cell
++    (Lin, 1991; loopUI `kldiv(..., 'js')` for two groups):
++
++        JS(x) = H( sum_g w_g p_g(x) ) - sum_g w_g H( p_g(x) ),
++
++    where p_g(x) is the vector of class frequencies of group g at cell x, w_g the weight of group g
++    (w_g >= 0, sum w_g = 1) and H the entropy of entropy_map. JS = 0 where all groups have the same
++    frequencies; JS <= ln G.
++
++    Parameters
++    ----------
++    p : (G, n_classes, nz, ny, nx), e.g. from class_frequencies with groups = chain ids.
++    weights : (G,) non-negative weights, normalised here; None = equal weights. With the numbers of models
++        per group (`n` of class_frequencies), w_g = n_g / N and JS(x) is the mutual information between the
++        group of a model and the class of cell x in the pooled ensemble; js_null_level then gives its value
++        expected from sampling alone.
++
++    Returns (nz, ny, nx).
++    """
++    p = np.asarray(p, dtype=np.float64)
++    G = p.shape[0]
++    w = np.full(G, 1.0 / G) if weights is None else np.asarray(weights, float) / np.sum(weights)
++    mix = np.tensordot(w, p, axes=(0, 0))
++    return np.maximum(entropy_map(mix) - np.tensordot(w, entropy_map(p), axes=(0, 0)), 0.0)
++
++
++def js_null_level(p_pooled, n, n_eff=None):
++    """
++    Value of js_divergence_map (with weights w_g = n_g / N) expected when all groups sample the same
++    distribution, from the finite number of models only:
++
++        E[JS(x)] ~= (c(x) - 1) / 2 * sum_g w_g (1 - w_g) / N_eff,g,
++
++    where c(x) is the number of classes present at cell x in the pooled ensemble (p_pooled: frequencies of
++    all the models together, (n_classes, nz, ny, nx)), n_g the number of models of group g, N = sum_g n_g,
++    w_g = n_g / N, and N_eff,g the effective sample size of group g (n_eff; n_g for independent models, see
++    effective_sample_size and chain_effective_sizes).
++
++    For independent models the level is (c - 1)(G - 1) / (2N), G being the number of groups: 2N JS(x) is
++    then the G-statistic of the test of homogeneity of the groups at x, asymptotically chi-square with
++    (c - 1)(G - 1) degrees of freedom (Wilks, 1938). The general form follows from the bias of the entropy
++    of estimated frequencies, -sum_k Var(p_k) / (2 p_k) to second order, where the frequencies of an
++    autocorrelated chain have the variance p_k (1 - p_k) / N_eff,g of N_eff,g independent models.
++
++    The approximation assumes large counts and underestimates the expected value where some classes occur in
++    few models: on the synthetic ensemble (random groups of one chain, 150 models), the mean JS is 1.16 times
++    the level. It is a reference level, not a test: JS(x) of several times the level marks cells where the
++    groups disagree beyond sampling noise.
++
++    Parameters
++    ----------
++    p_pooled : (n_classes, nz, ny, nx) frequencies of all the models.
++    n : (G,) numbers of models per group (`n` of class_frequencies).
++    n_eff : (G,) effective sample sizes, or None (= n, independent models).
++    """
++    n = np.asarray(n, dtype=float)
++    if n.ndim != 1 or n.size < 2:
++        raise ValueError("n must hold the numbers of models of the G >= 2 groups (the `n` of class_frequencies); "
++                         "the former signature js_null_level(p_pooled, n_groups, n_models) is no longer used")
++    n_eff = n if n_eff is None else np.asarray(n_eff, dtype=float)
++    w = n / n.sum()
++    c = cardinality_map(p_pooled)
++    return np.maximum(c - 1, 0) / 2.0 * float(np.sum(w * (1.0 - w) / n_eff))
++
++
++def effective_sample_size(x):
++    """
++    Effective sample size of a sequence x_1, ..., x_n of values along a chain (Geyer, 1992):
++
++        N_eff = n / tau,   tau = -1 + 2 sum_{m=0}^{M} Gamma_m,   Gamma_m = rho_{2m} + rho_{2m+1},
++
++    where rho_k is the lag-k autocorrelation of x (rho_0 = 1) and tau the integrated autocorrelation time. The
++    sum stops before the first Gamma_m <= 0 (initial positive sequence), and the Gamma_m are made
++    non-increasing (initial monotone sequence). N_eff = n for independent values; N_eff < n when each value
++    is correlated with the next ones. Capped at n; nan for a constant sequence, which tells nothing about the
++    autocorrelation.
++    """
++    x = np.asarray(x, dtype=np.float64)
++    n = x.size
++    if n < 4 or np.ptp(x) == 0:
++        return np.nan
++    y = x - x.mean()
++    f = np.fft.rfft(y, 2 * n)                               # zero padding: no circular wrap-around
++    acf = np.fft.irfft(f * np.conj(f), 2 * n)[:n]
++    acf /= acf[0]
++    m = (n - 1) // 2
++    gam = acf[0:2 * m:2] + acf[1:2 * m + 1:2]                # Gamma_0, ..., Gamma_{m-1}
++    stop = np.flatnonzero(gam <= 0)
++    gam = np.minimum.accumulate(gam[:stop[0]] if stop.size else gam)
++    tau = -1.0 + 2.0 * gam.sum()
++    return float(min(n, n / tau)) if tau > 0 else float(n)
++
++
++def chain_effective_sizes(codes, n_classes, groups=None, reference=None, order=None, class_names=None):
++    """
++    Effective sample size of each chain (group of models), from global summaries of each model followed along
++    the chain: the volume fraction of each class and, with reference codes, the fraction of cells whose class
++    differs from the reference unit (departure from the prior model). Configurations that persist along the
++    chain make all its summaries autocorrelated. The N_eff of a chain is the median of the N_eff of its
++    summaries (effective_sample_size); the smallest is also given, as a conservative bound. The estimate from
++    a single summary is noisy (about 10 % for 400 independent models), and the median is less affected by
++    that noise than the minimum. Cell-wise class indicators are not all as autocorrelated as the global
++    summaries, so that N_eff is a representative value for the chain, not a cell-by-cell one.
++
++    Thinning (saving one model out of k) reduces the autocorrelation between saved models but does not remove
++    it when configurations persist over more than k iterations.
++
++    Parameters
++    ----------
++    codes : (nz, ny, nx, N) canonical codes (canonical_ensemble).
++    groups : (N,) chain of each model, or None (one group).
++    reference : (nz, ny, nx) reference codes (motif_analysis.reference_codes), or None.
++    order : (N,) position of each model along its chain (e.g. index_in_chain of the saved models); None = the
++        order of the models in the ensemble.
++    class_names : names of the n_classes classes, for the table (default: 0..K-1 and 'born').
++
++    Returns a DataFrame with one row per group (sorted labels): n_models, N_eff (median over the summaries),
++    N_eff/n, the smallest N_eff and the summary giving it, and the median lag-1 autocorrelation of the
++    summaries.
++    """
++    nz, ny, nx, N = codes.shape
++    nc = ny * nx
++    cn = list(class_names) if class_names is not None else [str(k) for k in range(n_classes - 1)] + ['born']
++    off = (np.arange(N, dtype=np.int64) * n_classes)[None, :]
++    counts = np.zeros(N * n_classes, np.int64)
++    dep = np.zeros(N) if reference is not None else None
++    ref = None if reference is None else np.asarray(reference)
++    for z in range(nz):                                      # one pass per depth slice, all models at once
++        c = np.minimum(np.asarray(codes[z]).reshape(nc, N), n_classes - 1)
++        counts += np.bincount((off + c).ravel(), minlength=N * n_classes)
++        if ref is not None:
++            dep += (c != ref[z].reshape(nc, 1)).sum(0)
++    frac = counts.reshape(N, n_classes) / float(nz * nc)
++    series = [(f'fraction of {cn[k]}', frac[:, k]) for k in range(n_classes)]
++    if ref is not None:
++        series.append(('departure from the reference', dep / float(nz * nc)))
++    if groups is None:
++        names, gi = np.array(['all']), np.zeros(N, np.int64)
++    else:
++        names, gi = np.unique(np.asarray(groups), return_inverse=True)
++        gi = gi.reshape(-1)
++    order = np.arange(N) if order is None else np.asarray(order)
++    rows = []
++    for g in range(len(names)):
++        idx = np.flatnonzero(gi == g)
++        idx = idx[np.argsort(order[idx], kind='stable')]
++        ess, lag1, used = [], [], []
++        for name, v in series:
++            x = v[idx]
++            e = effective_sample_size(x)
++            if np.isfinite(e):                                  # constant summaries say nothing
++                ess.append(e)
++                lag1.append(float(np.corrcoef(x[:-1], x[1:])[0, 1]))
++                used.append(name)
++        n_g = len(idx)
++        if ess:
++            j = int(np.argmin(ess))
++            rows.append({'n_models': n_g, 'N_eff': float(np.median(ess)), 'N_eff/n': float(np.median(ess)) / n_g,
++                         'N_eff min': ess[j], 'smallest for': used[j], 'lag-1 autocorrelation': float(np.median(lag1))})
++        else:
++            rows.append({'n_models': n_g, 'N_eff': float(n_g), 'N_eff/n': 1.0, 'N_eff min': float(n_g),
++                         'smallest for': None, 'lag-1 autocorrelation': np.nan})
++    return pd.DataFrame(rows, index=pd.Index(names, name='group'))
++
++
++def kl_divergence_map(p, q, n_q, alpha=0.5):
++    """
++    Kullback-Leibler divergence of the class frequencies p (e.g. posterior) from q (e.g. prior) at each
++    cell (Kullback & Leibler, 1951):
++
++        D(x) = sum_k p_k(x) ln( p_k(x) / q~_k(x) ),   q~_k(x) = (n_q q_k(x) + alpha) / (n_q + alpha c),
++
++    where c is the number of classes, n_q the number of models behind q and alpha a pseudo-count (0.5:
++    Krichevsky & Trofimov, 1981), which keeps D finite where a class is absent from the prior sample. D is
++    the information gained on the unit at x from prior to posterior (Lindley, 1956): it detects a change of
++    the most probable unit even where the entropy does not decrease. Shapes of p and q as in entropy_map
++    (q broadcast to p).
++    """
++    p = np.asarray(p, dtype=np.float64)
++    q = np.asarray(q, dtype=np.float64)
++    c = p.shape[-4]
++    qs = np.broadcast_to((n_q * q + alpha) / (n_q + alpha * c), p.shape)
++    t = np.zeros_like(p)
++    m = p > 0
++    t[m] = p[m] * np.log(p[m] / qs[m])
++    return t.sum(axis=-4)
++
++
++def group_summary(p, names, n, mask=None, p_conf=0.95, born=False):
++    """
++    One row per group: number of models, mean entropy over the cells, fraction of uncertain cells (the most
++    frequent class has a frequency below p_conf) and mean cardinality with p_min = 0.05; with born=True (the
++    last class is the born class, as from canonical_ensemble), the mean probability of a born unit over the
++    cells, i.e. the expected fraction of the volume occupied by born units. mask: (nz, ny, nx) boolean, cells
++    taken into account (None: all). The mean entropy measures the spread of a cluster in unit geometry only,
++    whereas a standard deviation of densities mixes geometry and sampled densities.
++    """
++    sel = np.asarray(mask, bool) if mask is not None else Ellipsis
++    rows = []
++    for pg in p:                                          # one group at a time: memory of one group
++        rows.append((entropy_map(pg)[sel].mean(), (pg.max(axis=0)[sel] < p_conf).mean(),
++                     cardinality_map(pg, 0.05)[sel].mean(), pg[-1][sel].mean()))
++    H, unc, card, pb = np.array(rows).T
++    out = pd.DataFrame({'n_models': n, 'mean_entropy': H, 'frac_uncertain': unc, 'mean_cardinality': card},
++                       index=pd.Index(names, name='group'))
++    if born:
++        out['born_volume'] = pb
++    return out
++
++
++# ---------------------------------------------------------------------------
++# 2. Connectivity of density sets
++# ---------------------------------------------------------------------------
++def connectivity_gamma(mask):
++    """
++    Connectivity of a set of cells (Renard & Allard, 2013; loopUI `continuous_pct_connectivity`):
++
++        Gamma = sum_j (n_j / n)^2,
++
++    where n_j is the number of cells of the j-th 6-connected component of the set and n the number of cells
++    of the set. Gamma is the probability that two cells drawn at random in the set are connected: 1 for a
++    single body, about 1/m for m bodies of equal size. nan for an empty set (loopUI returns 0, which
++    would read as "disconnected").
++    """
++    s = np.bincount(_label(np.asarray(mask, dtype=np.uint8)).ravel())[1:].astype(np.float64)
++    n = s.sum()
++    return float((s ** 2).sum() / n ** 2) if n else np.nan
++
++
++def _gamma_batch(models, thresholds, above):
++    n, T = models.shape[-1], len(thresholds)
++    g, f = np.full((n, T), np.nan), np.zeros((n, T))
++    for i in range(n):
++        m = models[..., i]
++        for j, t in enumerate(thresholds):
++            s = m >= t if above else m < t
++            f[i, j] = s.mean()
++            g[i, j] = connectivity_gamma(s)
++    return g, f
++
++
++def gamma_curves(models, thresholds, above=True, n_jobs=-1, batch=50):
++    """
++    Connectivity curve Gamma(t) of every model: Gamma of the set of cells with density >= t (above=True)
++    or < t (above=False), for each threshold t, and the volume fraction of that set.
++
++    The thresholds are shared by all models (in density units), unlike loopUI, which thresholds each model
++    at its own percentiles: the curves of different models then describe the same rocks. For level-set
++    models, thresholds placed between the densities of the units select unions of units, e.g. all units
++    denser than the host, whatever their identity (reference or born).
++
++    Returns (gamma (N, T), volume fraction (N, T)); gamma is nan where the set is empty.
++    """
++    thresholds = list(np.atleast_1d(thresholds))
++    bounds = _bounds(models.shape[-1], batch)
++    res = Parallel(n_jobs=n_jobs, max_nbytes=None)(
++        delayed(_gamma_batch)(np.ascontiguousarray(models[..., i0:i1]), thresholds, above) for i0, i1 in bounds)
++    return np.vstack([r[0] for r in res]), np.vstack([r[1] for r in res])
++
++
++def class_densities(models, codes, n_classes, n_sample=50):
++    """
++    Densities of the classes over an evenly spaced sample of n_sample models: for each class, the number of
++    sampled models where it is present and the median, 5 % and 95 % quantiles and maximum of its density
++    (the median density of its cells in each model; for the born class, of all the born units together).
++    Used to place the thresholds of gamma_curves and connected_between between the units: a threshold
++    between the 95 % quantile of one unit and the 5 % quantile of the next selects the same units in every
++    model, whereas a threshold inside the range of a unit selects it in some models only.
++    """
++    N = models.shape[-1]
++    rows = [[] for _ in range(n_classes)]
++    for i in np.unique(np.linspace(0, N - 1, min(n_sample, N)).round().astype(int)):
++        c = np.minimum(np.asarray(codes[..., i]), n_classes - 1).ravel()
++        m = np.asarray(models[..., i]).ravel()
++        order = np.argsort(c, kind='stable')
++        bounds = np.searchsorted(c[order], np.arange(n_classes + 1))
++        for k in range(n_classes):
++            if bounds[k + 1] > bounds[k]:
++                rows[k].append(float(np.median(m[order[bounds[k]:bounds[k + 1]]])))
++    out = {k: dict(n_models=len(r), median=np.median(r), q05=np.quantile(r, 0.05), q95=np.quantile(r, 0.95),
++                   max=np.max(r)) if r else dict(n_models=0) for k, r in enumerate(rows)}
++    return pd.DataFrame.from_dict(out, orient='index').rename_axis('class')
++
++
++def box(shape, z=None, y=None, x=None):
++    """Boolean mask of a box of a (nz, ny, nx) grid: z, y, x are (start, stop) cell indices, None = whole axis."""
++    m = np.zeros(shape, bool)
++    m[tuple(slice(*r) if r is not None else slice(None) for r in (z, y, x))] = True
++    return m
++
++
++def _connected_batch(models, a, b, threshold, above):
++    out = np.zeros(models.shape[-1], bool)
++    for i in range(models.shape[-1]):
++        m = models[..., i]
++        lab = _label((m >= threshold if above else m < threshold).astype(np.uint8))
++        la, lb = np.unique(lab[a]), np.unique(lab[b])
++        out[i] = np.intersect1d(la[la > 0], lb[lb > 0], assume_unique=True).size > 0
++    return out
++
++
++def connected_between(models, region_a, region_b, threshold, above=True, n_jobs=-1, batch=50):
++    """
++    Indicator, for every model, of the hypothesis "a 6-connected body of cells with density >= threshold
++    (above=True; < threshold otherwise) reaches both region_a and region_b", e.g. "the southern and the
++    northern dense bodies are one body". region_a, region_b: boolean masks (nz, ny, nx), e.g. from box().
++    Returns a boolean array (N,), to be passed to motif_analysis.hypothesis_table.
++
++    The hypothesis concerns the set of dense cells, whatever the units they belong to (two dense born units
++    in contact are one body here, two bodies in motif_analysis). It extends the connectivity indicators of
++    loopUI and Renard & Allard (2013) from a summary of the set to a statement about given locations.
++    """
++    a, b = np.asarray(region_a, bool), np.asarray(region_b, bool)
++    bounds = _bounds(models.shape[-1], batch)
++    res = Parallel(n_jobs=n_jobs, max_nbytes=None)(
++        delayed(_connected_batch)(np.ascontiguousarray(models[..., i0:i1]), a, b, threshold, above)
++        for i0, i1 in bounds)
++    return np.concatenate(res)
++
++
++# ---------------------------------------------------------------------------
++# 3. Directional statistics of the classes of one model
++# ---------------------------------------------------------------------------
++def default_lags(shape, max_frac=0.5):
++    """Dyadic lags 1, 2, 4, ... (cells) up to max_frac of the length of each axis: {axis: (lags)}."""
++    out = {}
++    for a, n in enumerate(shape):
++        out[a] = tuple(2 ** i for i in range(64) if 2 ** i <= max_frac * n)
++    return out
++
++
++def _bodies(code):
++    """Bodies (6-connected components of each class) of one model of codes, labelled 1..n."""
++    return _label(np.asarray(code).astype(np.uint16) + 1)
++
++
++def class_gamma(code, n_classes, bodies=None):
++    """
++    Connectivity Gamma_k = sum_j (n_j / n_k)^2 of each class k of one model (connectivity_gamma applied to
++    the cells of class k), with n_j the number of cells of body j of class k and n_k the number of cells of
++    class k. 1 for a class made of one body; it decreases as the class breaks into pieces, which the capped
++    body counts of the topology key record only as integers. nan for an absent class. The bodies of the
++    born class are those of each born unit: two born units in contact are two bodies.
++    bodies: labels from _bodies(code), if already computed.
++    """
++    c = np.asarray(code)
++    b = (_bodies(c) if bodies is None else bodies).ravel()
++    size = np.bincount(b).astype(np.float64)
++    cls = np.zeros(size.size, np.int64)
++    cls[b] = np.minimum(c.ravel(), n_classes - 1)        # class of each body (all its cells agree)
++    nk = np.bincount(cls[1:], weights=size[1:], minlength=n_classes)
++    s2 = np.bincount(cls[1:], weights=size[1:] ** 2, minlength=n_classes)
++    with np.errstate(invalid='ignore', divide='ignore'):
++        return np.where(nk > 0, s2 / nk ** 2, np.nan)
++
++
++def lag_statistics(code, n_classes, lags=None, bodies=None):
++    """
++    Directional indicator variogram and connectivity function of each class of one model.
++
++    For class k, grid axis a (0 = depth, 1 = y, 2 = x) and lag h (cells), over the P pairs of cells
++    (x, x + h e_a) of the grid, where e_a is the unit vector of axis a and I_k(x) = 1 if cell x belongs
++    to class k and 0 otherwise:
++
++        gamma_k(h) = (1 / 2P) sum (I_k(x) - I_k(x + h e_a))^2       (indicator semi-variogram; Goovaerts, 1997)
++        tau_k(h)   = P( x ~ x + h e_a | I_k(x) = I_k(x + h e_a) = 1 )  (connectivity function; Renard & Allard, 2013)
++
++    where x ~ y means that x and y belong to the same body (6-connected component of one unit; for the born
++    class, of one born unit). gamma_k(h)
++    rises from 0 to p_k(1 - p_k), p_k being the volume fraction of class k, over a distance that measures
++    the size of its bodies along axis a; tau_k(h) = 1 for a class made of one body and decreases with h
++    when the class is split into bodies smaller than h.
++
++    All pairs are used (no sampling, unlike loopUI), from counts over the shifted grids:
++    gamma_k = (n_k^- + n_k^+ - 2 n_kk) / (2P) and tau_k = n_kk^conn / n_kk, where n_k^- and n_k^+ are the
++    numbers of pairs whose first and second cell are in class k, n_kk those with both cells in class k, and
++    n_kk^conn those with both cells in the same body of class k.
++
++    Parameters
++    ----------
++    code : (nz, ny, nx) canonical codes of one model.
++    lags : {axis: sequence of lags in cells}; None = default_lags(code.shape). Lags of the same physical
++        length along axes with different cell sizes are obtained by dividing by the cell size.
++    bodies : labels from _bodies(code), if already computed.
++
++    Returns
++    -------
++    vario, tau : dicts {axis: (n_classes, n_lags) array}; tau is nan where no pair lies in class k.
++    """
++    c = np.asarray(code)
++    b = _bodies(c) if bodies is None else bodies          # bodies of each unit (born units distinct)
++    c = np.minimum(c, n_classes - 1)                      # classes (born units grouped)
++    lags = default_lags(c.shape) if lags is None else lags
++    vario, tau = {}, {}
++    for a, hs in lags.items():
++        V = np.full((n_classes, len(hs)), np.nan)
++        T = np.full((n_classes, len(hs)), np.nan)
++        n = c.shape[a]
++        for j, h in enumerate(hs):
++            if not 0 < h < n:
++                continue
++            lo, hi = [slice(None)] * 3, [slice(None)] * 3
++            lo[a], hi[a] = slice(0, n - h), slice(h, n)
++            ca, cb = c[tuple(lo)].ravel(), c[tuple(hi)].ravel()
++            same = ca == cb
++            n_lo = np.bincount(ca, minlength=n_classes)
++            n_hi = np.bincount(cb, minlength=n_classes)
++            n_kk = np.bincount(ca[same], minlength=n_classes)
++            n_conn = np.bincount(ca[b[tuple(lo)].ravel() == b[tuple(hi)].ravel()], minlength=n_classes)
++            V[:, j] = (n_lo + n_hi - 2 * n_kk) / (2.0 * ca.size)
++            with np.errstate(invalid='ignore', divide='ignore'):
++                T[:, j] = np.where(n_kk > 0, n_conn / n_kk, np.nan)
++        vario[a], tau[a] = V, T
++    return vario, tau
++
++
++# ---------------------------------------------------------------------------
++# 4. Per-model descriptors
++# ---------------------------------------------------------------------------
++def descriptor_names(n_classes, lags, class_names=None):
++    """Names of the columns of descriptor_table, in order (class names default to 0..K-1 and 'born')."""
++    cn = list(class_names) if class_names is not None else [str(k) for k in range(n_classes - 1)] + ['born']
++    names = [f'frac_{k}' for k in cn] + [f'Gamma_{k}' for k in cn]
++    for stat in ('vario', 'tau'):
++        for a in sorted(lags):
++            names += [f'{stat}_{k}_{AXES[a]}{h}' for k in cn for h in lags[a]]
++    return names
++
++
++def model_descriptors(code, n_classes, lags, normalise=True):
++    """
++    Descriptor vector of one model: volume fraction f_k and Gamma_k of each class k, then the variogram
++    and tau_k(h) for each axis, class and lag (order of descriptor_names). With normalise=True, the
++    variogram is divided by its sill f_k (1 - f_k), so that it rises from 0 to about 1 over the size of
++    the bodies of class k along the axis and carries their length scale, not their proportion (already in
++    f_k). Gamma and tau of an absent class, tau where no pair lies in the class, and the normalised
++    variogram of an absent class (or of a class filling the grid) are set to 0, so that every model has a
++    finite vector.
++    """
++    c = np.asarray(code)
++    b = _bodies(c)
++    frac = np.bincount(np.minimum(c, n_classes - 1).ravel(), minlength=n_classes) / c.size
++    vario, tau = lag_statistics(c, n_classes, lags, b)
++    if normalise:
++        sill = frac * (1.0 - frac)
++        with np.errstate(invalid='ignore', divide='ignore'):
++            vario = {a: np.where(sill[:, None] > 0, v / sill[:, None], 0.0) for a, v in vario.items()}
++    parts = [frac, class_gamma(c, n_classes, b)]
++    parts += [vario[a].ravel() for a in sorted(lags)] + [tau[a].ravel() for a in sorted(lags)]
++    return np.nan_to_num(np.concatenate(parts), nan=0.0)
++
++
++def _descriptor_batch(codes, n_classes, lags, normalise):
++    return np.stack([model_descriptors(codes[..., i], n_classes, lags, normalise) for i in range(codes.shape[-1])])
++
++
++def descriptor_table(codes, n_classes, lags=None, class_names=None, normalise=True, n_jobs=-1, batch=50):
++    """
++    Descriptor vectors of all the models of an ensemble of codes, as a DataFrame (N rows, one column per
++    descriptor, named by descriptor_names): volume fractions (frac_), connectivity of each class
++    (Gamma_), directional indicator variograms (vario_<class>_<axis><lag>; divided by the sill with
++    normalise=True, see model_descriptors) and connectivity functions (tau_<class>_<axis><lag>). Cost linear in N: about one connected-component pass and a few counts per
++    lag per model, against N(N - 1)/2 comparisons for the pairwise distances of loopUI.
++
++    Groups of columns for block_distance_correlation or for weighting in an embedding:
++    X.filter(regex='^frac_'), '^Gamma_', '^vario_', '^tau_'.
++    """
++    nz, ny, nx, N = codes.shape
++    lags = default_lags((nz, ny, nx)) if lags is None else {a: tuple(h for h in hs if 0 < h < (nz, ny, nx)[a])
++                                                             for a, hs in lags.items()}
++    bounds = _bounds(N, batch)
++    res = Parallel(n_jobs=n_jobs, max_nbytes=None)(
++        delayed(_descriptor_batch)(np.ascontiguousarray(codes[..., i0:i1]), n_classes, lags, normalise)
++        for i0, i1 in bounds)
++    return pd.DataFrame(np.vstack(res).astype(np.float32), columns=descriptor_names(n_classes, lags, class_names))
++
++
++# ---------------------------------------------------------------------------
++# 5. Redundancy between descriptor blocks
++# ---------------------------------------------------------------------------
++def block_distance_correlation(blocks, n_sub=500, metric='euclidean', seed=0, standardise=True):
++    """
++    Rank correlation between the distances that different descriptor blocks give to the same pairs of
++    models, the matrix counterpart of the cross-plots of indicators of loopUI (ui-9-comparison).
++
++    For each block (e.g. 'CNN', 'topological', 'petrophysical' of ensemble_features, and the groups of
++    columns of descriptor_table), the distances between the models of a common random subset of n_sub
++    models are computed (scipy pdist, after standardising each column within the subset), and the
++    Spearman correlation between the n_sub (n_sub - 1) / 2 distances of every two blocks is returned
++    (Mantel, 1967). A correlation close to 1 means that two blocks rank the pairs of models alike, i.e.
++    that one adds little to the other in an embedding; a low correlation means that they see different
++    differences between models. No p-value is given: the distances of a matrix are not independent.
++
++    Parameters
++    ----------
++    blocks : dict {name: (N, F) array or DataFrame}, same models in the same order.
++    metric : distance passed to pdist ('euclidean', 'cosine', ...).
++
++    Returns a DataFrame (blocks x blocks).
++    """
++    from scipy.spatial.distance import pdist
++    from scipy.stats import rankdata
++    names = list(blocks)
++    N = len(blocks[names[0]])
++    idx = np.sort(np.random.default_rng(seed).choice(N, size=min(n_sub, N), replace=False))
++    ranks = []
++    for k in names:
++        X = np.asarray(blocks[k], dtype=np.float64)[idx]
++        if standardise:
++            s = X.std(0)
++            X = (X - X.mean(0)) / np.where(s > 0, s, 1.0)
++        ranks.append(rankdata(pdist(X, metric=metric)))
++    return pd.DataFrame(np.corrcoef(np.vstack(ranks)), index=names, columns=names)
++
++
++# ---------------------------------------------------------------------------
++# 6. Figure
++# ---------------------------------------------------------------------------
++def plot_sections(vol, title='', iz=None, iy=None, ix=None, cmap='viridis', vmin=None, vmax=None,
++                  cell_sizes=None, label='', axes=None):
++    """
++    Map at depth index iz and vertical sections at iy (x-depth) and ix (y-depth) of a cell-wise volume
++    (nz, ny, nx), e.g. an entropy or divergence map. Defaults: a quarter of the depth, middle of y and x.
++    cell_sizes = (dz, dy, dx) gives axes in metres and true proportions; None: cells. Returns the figure.
++    """
++    import matplotlib.pyplot as plt
++    vol = np.asarray(vol)
++    nz, ny, nx = vol.shape
++    iz = nz // 4 if iz is None else iz
++    iy = ny // 2 if iy is None else iy
++    ix = nx // 2 if ix is None else ix
++    dz, dy, dx = (1.0, 1.0, 1.0) if cell_sizes is None else cell_sizes
++    u = 'cells' if cell_sizes is None else 'm'
++    panels = [(vol[iz], f'map, depth index {iz}', 'lower', (0, nx * dx, 0, ny * dy), 'x', 'y'),
++              (vol[:, iy, :], f'section y index {iy}', 'upper', (0, nx * dx, nz * dz, 0), 'x', 'depth'),
++              (vol[:, :, ix], f'section x index {ix}', 'upper', (0, ny * dy, nz * dz, 0), 'y', 'depth')]
++    if axes is None:
++        fig, axes = plt.subplots(1, 3, figsize=(14, 3.8), constrained_layout=True)
++    fig = axes[0].figure
++    vmin = np.nanmin(vol) if vmin is None else vmin
++    vmax = np.nanmax(vol) if vmax is None else vmax
++    for ax, (img, t, org, ext, xl, yl) in zip(axes, panels):
++        im = ax.imshow(img, origin=org, extent=ext, cmap=cmap, vmin=vmin, vmax=vmax, interpolation='nearest')
++        ax.set_title(t, fontsize=9)
++        ax.set_xlabel(f'{xl} ({u})', fontsize=8)
++        ax.set_ylabel(f'{yl} ({u})', fontsize=8)
++        ax.tick_params(labelsize=7)
++    fig.colorbar(im, ax=list(axes), fraction=0.02, pad=0.01).set_label(label, fontsize=8)
++    if title:
++        fig.suptitle(title, fontsize=11)
++    return fig

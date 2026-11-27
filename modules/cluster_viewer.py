@@ -9,6 +9,14 @@ in the drop-down list (or tapped in the embedding), on a vertical section at
 a fixed y (x-z panel), at a fixed x (y-z panel) or on a depth map (x-y panel).
 A table lists the clusters with their size, chain composition and spread.
 
+A second row of panels gives, for the cluster chosen, the entropy of the unit and the probability of a born unit at
+each cell, computed over the members of the cluster, and the table gives their means over the cells: the spread of the
+cluster in unit geometry (the standard deviation of the densities also reflects the sampled densities) and where its
+models hold born units. The units of every model are matched to a reference (ensemble_indicators.canonical_ensemble):
+the reference codes passed as `reference` (e.g. the prior model, as for the motifs), the unit codes passed as `codes`,
+or by default a modal reference built from the ensemble (motif_analysis.modal_reference), whose units are those present
+in most models; born units are then the units absent from it. unit_maps=False leaves these panels out.
+
 With a motif table (motifs=, from motif_analysis.motif_table) the page also gives, for each model, its motifs
 in the hover and a 'colour by motif' menu, and for each cluster P(motif | cluster), the enrichment
 E = P(motif | cluster) / P(motif) in the information panel, a heatmap of E (clusters x motifs) and E columns in the
@@ -38,7 +46,7 @@ from bokeh.layouts import column, row
 from bokeh.models import (ColumnDataSource, HoverTool, TapTool, CustomJS, Select, RadioButtonGroup, Div,
                           LinearColorMapper, ColorBar, DataTable, TableColumn, NumberFormatter,
                           CustomJSTickFormatter, Range1d, FixedTicker)
-from bokeh.palettes import Viridis256, Magma256, RdBu11
+from bokeh.palettes import Viridis256, Magma256, Plasma256, RdBu11
 from bokeh.plotting import figure
 from bokeh.resources import INLINE
 
@@ -89,12 +97,15 @@ def _image_figure(title, w_cells, h_cells, mapper, orient, width=320, unit=None)
     return p, src
 
 
-def _guide_html(thumb_where, partial_thumbs, has_chain, has_m):
+def _guide_html(thumb_where, partial_thumbs, has_chain, has_m, has_u=False):
     """HTML of the short 'How to use' note placed under the section panels."""
     items = [f'<b>Hover</b> over a point to see its model on the {thumb_where}'
              + (' (grey box: no preview stored)' if partial_thumbs else '') + '.',
              '<b>Click</b> a point to select its cluster: its members are highlighted and the panels above show '
              'this cluster. The drop-down list does the same.',
+             *(['<b>Entropy and born units</b> (second row): entropy of the unit at each cell over the members of '
+                'the cluster (0 where they all hold the same unit), and fraction of the members holding a born unit '
+                'there.'] if has_u else []),
              '<b>Zoom</b> with the mouse wheel, <b>pan</b> by dragging; the toolbar has a box zoom and a reset button.']
     c = []
     if has_chain:
@@ -113,7 +124,8 @@ def _guide_html(thumb_where, partial_thumbs, has_chain, has_m):
 def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None, truth=None,
                  min_size=5, max_clusters=60, vmin=None, vmax=None, vmax_std=None, thumb_orient='y', orient='y',
                  title='Cluster viewer', with_table=True, max_thumbs=3000, seed=0,
-                 motifs=None, topology=None, extra=None, tooltip_extra=None, unit='kg/m³', guide=True):
+                 motifs=None, topology=None, extra=None, tooltip_extra=None, unit='kg/m³', guide=True,
+                 codes=None, n_classes=None, vmax_entropy=None, reference=None, unit_maps=True):
     """
     Build the Bokeh layout of the viewer.
 
@@ -138,6 +150,16 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
         (the standard deviation has the unit of the model); None = no unit.
     guide : True = short 'How to use' note under the section panels (the colour-by item only when that menu
         exists), False = none, str = your own HTML in its place.
+    codes, n_classes : unit codes of the models (nz, ny, nx, N) and number of classes, from
+        ensemble_indicators.canonical_ensemble (reference units 0 to n_classes - 2, born units above, grouped in
+        one class). When given, a second row of panels shows, for the cluster chosen, the entropy of the unit
+        H(x) = -sum_k p_k(x) ln p_k(x) and the probability of a born unit p_born(x), p_k(x) being the fraction of
+        the members of the cluster whose cell x belongs to class k; the table and the information panel give the
+        means of H and p_born over the cells. vmax_entropy: top of the entropy colour scale (99th percentile of
+        the panels if None, at most ln(n_classes)); p_born is drawn from 0 to 1.
+    reference : reference codes or reference model (nz, ny, nx), used to compute the unit codes when codes is None;
+        None = modal reference built from the ensemble (motif_analysis.modal_reference, 200 models).
+    unit_maps : False = no entropy and born-unit panels when codes is None (the viewer of the earlier versions).
     """
     nz, ny, nx, N = core.shape
     orient0 = orient
@@ -171,11 +193,31 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
         extra = pd.DataFrame(extra).reset_index(drop=True)
         assert len(extra) == N, f"extra has {len(extra)} rows, the ensemble {N} models"
         extra_rows = []
+    if codes is None and unit_maps:      # unit codes matched to the reference, or to a modal reference
+        import ensemble_indicators as ei
+        from time import time
+        t0 = time()
+        if reference is None:
+            import motif_analysis as ma
+            reference = ma.modal_reference(core, n_sample=min(200, N))
+            what = 'modal reference built from the ensemble'
+        else:
+            what = 'reference given'
+        codes, n_classes = ei.canonical_ensemble(core, reference)
+        print(f"viewer: units matched to the {what} ({n_classes - 1} units and the born class) in {time() - t0:.0f} s")
+    has_u = codes is not None
+    if has_u:
+        import ensemble_indicators as ei
+        assert codes.shape == core.shape, f"codes {codes.shape} and core {core.shape} differ"
+        if n_classes is None:
+            raise ValueError("n_classes is needed with codes (second output of canonical_ensemble)")
+    keys = ['med', 'std', 'rep'] + (['ent', 'born'] if has_u else [])
 
     # --- per-cluster statistics: sections of the median, std and representative models ---
-    stats = {k: [] for k in ('cluster', 'n', 'members', 'info', 'rep_index', 'mean_std')}
+    stats = {k: [] for k in ('cluster', 'n', 'members', 'info', 'rep_index', 'mean_std')
+             + (('mean_ent', 'born_vol') if has_u else ())}
     for o, _ in _ORIENTS:
-        for s in ('med', 'std', 'rep'):
+        for s in keys:
             stats[f'{s}_{o}'] = []
     chains = np.unique(chain_id) if chain_id is not None else []
     stacks = {o: section_stack(core, o, iy, ix, iz) for o, _ in _ORIENTS}   # the three sections of every model
@@ -197,6 +239,17 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
         if chain_id is not None:
             info.append('chains: ' + ', '.join(f'{c} {np.mean(chain_id[idx] == c):.0%}' for c in chains))
         info.append(f'mean voxel std: {std.mean():.1f}')
+        if has_u:                     # class frequencies over the members: entropy and probability of a born unit
+            pu = ei.class_frequencies(codes[..., idx], n_classes)[0][0]
+            H, pb = ei.entropy_map(pu).astype(np.float32), pu[-1]
+            stats['mean_ent'].append(float(H.mean()))
+            stats['born_vol'].append(float(pb.mean()))
+            for o, _ in _ORIENTS:
+                for s_, vol in (('ent', H), ('born', pb)):
+                    sec = np.asarray(section(vol, o, iy, ix, iz), dtype=np.float32)
+                    stats[f'{s_}_{o}'].append(sec[::-1] if o != 'z' else sec)
+            info.append(f'mean unit entropy: {H.mean():.2f} nats (at most ln {n_classes} = {np.log(n_classes):.2f}); '
+                        f'born units: {pb.mean():.1%} of the cells on average')
         if truth is not None:
             flags = [c for c in ('high', 'lens', 'dyke', 'pipe') if c in truth]
             info.append('bodies: ' + ', '.join(f'{c} {np.mean(truth[c].values[idx].astype(bool)):.0%}' for c in flags))
@@ -228,6 +281,9 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
     stats_src = ColumnDataSource(data=stats)
     if vmax_std is None:
         vmax_std = float(max(np.percentile(a, 99) for a in stats['std_y'] + stats['std_x'])) or 1.0
+    if has_u and vmax_entropy is None:
+        vmax_entropy = min(float(max(np.percentile(a, 99) for a in stats['ent_y'] + stats['ent_x'] + stats['ent_z'])),
+                           float(np.log(n_classes))) or float(np.log(n_classes))
 
     # --- embedding scatter with thumbnails ---
     if max_thumbs is None or N <= max_thumbs:
@@ -302,6 +358,9 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
     # --- image panels ---
     mapper = LinearColorMapper(palette=Viridis256, low=vmin, high=vmax)
     mapper_std = LinearColorMapper(palette=Magma256, low=0, high=vmax_std)
+    if has_u:
+        mapper_ent = LinearColorMapper(palette=Magma256, low=0, high=vmax_entropy)
+        mapper_born = LinearColorMapper(palette=Plasma256, low=0, high=1)
     dims = {'y': (nx, nz), 'x': (ny, nz), 'z': (nx, ny)}
     panels, img_srcs = {}, {}
     for o, _ in _ORIENTS:
@@ -311,6 +370,11 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
                         ('rep', 'representative model', mapper)):
             panels[o][s], img_srcs[o][s] = _image_figure(t, w, h, m, o, unit=unit)
             panels[o][s].visible = (o == orient0)
+        if has_u:
+            for s, t, m, u in (('ent', 'entropy of the unit', mapper_ent, 'nats'),
+                               ('born', 'probability of a born unit', mapper_born, 'P')):
+                panels[o][s], img_srcs[o][s] = _image_figure(t, w, h, m, o, unit=u)
+                panels[o][s].visible = (o == orient0)
     info_div = Div(text=stats['info'][0], width=560)
     select = Select(title='Cluster (sorted by size)', value='0',
                     options=[(str(k), f'cluster {cl}  (n = {n})') for k, (cl, n) in enumerate(zip(ids, stats['n']))],
@@ -319,28 +383,27 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
 
     flat = {f'src_{s}_{o}': img_srcs[o][s] for o in img_srcs for s in img_srcs[o]}
     flat.update({f'panel_{s}_{o}': panels[o][s] for o in panels for s in panels[o]})
+    def _js_dict(prefix):            # {y: {med: src_med_y, ...}, x: {...}, z: {...}} over the panels shown
+        return '{' + ', '.join(o + ': {' + ', '.join(f'{s}: {prefix}_{s}_{o}' for s in keys) + '}'
+                               for o, _ in _ORIENTS) + '}'
     cb = CustomJS(args=dict(stats=stats_src, select=select, orient=orient, sc=sc_src, info=info_div,
-                            orients=[o for o, _ in _ORIENTS], **flat),
+                            orients=[o for o, _ in _ORIENTS], keys=keys, **flat),
                   code="""
-        const srcs = {y: {med: src_med_y, std: src_std_y, rep: src_rep_y},
-                      x: {med: src_med_x, std: src_std_x, rep: src_rep_x},
-                      z: {med: src_med_z, std: src_std_z, rep: src_rep_z}};
-        const panels = {y: {med: panel_med_y, std: panel_std_y, rep: panel_rep_y},
-                        x: {med: panel_med_x, std: panel_std_x, rep: panel_rep_x},
-                        z: {med: panel_med_z, std: panel_std_z, rep: panel_rep_z}};
+        const srcs = SRCS;
+        const panels = PANELS;
         const k = parseInt(select.value);
         const o = orients[orient.active];
         for (const oo of orients) {
-            for (const s of ['med', 'std', 'rep']) {
+            for (const s of keys) {
                 panels[oo][s].visible = (oo === o);
             }
         }
-        for (const s of ['med', 'std', 'rep']) {
+        for (const s of keys) {
             srcs[o][s].data = {image: [stats.data[s + '_' + o][k]]};
         }
         info.text = stats.data['info'][k];
         sc.selected.indices = Array.from(stats.data['members'][k]);
-    """)
+    """.replace('SRCS', _js_dict('src')).replace('PANELS', _js_dict('panel')))
     select.js_on_change('value', cb)
     orient.js_on_change('active', cb)
     # tapping one point selects its cluster (a single selected index that belongs to a shown cluster)
@@ -408,7 +471,14 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
     tab = {'cluster': ids, 'n': stats['n'],
            'mean_voxel_std': stats['mean_std']}
     cols = [TableColumn(field='cluster', title='cluster', width=60), TableColumn(field='n', title='n', width=50),
-            TableColumn(field='mean_voxel_std', title='mean voxel std', formatter=NumberFormatter(format='0.0'))]
+            TableColumn(field='mean_voxel_std', title='mean voxel std', formatter=NumberFormatter(format='0.0'),
+                        width=100)]
+    if has_u:
+        tab['mean_entropy'], tab['born_volume'] = stats['mean_ent'], stats['born_vol']
+        cols += [TableColumn(field='mean_entropy', title='mean entropy', formatter=NumberFormatter(format='0.00'),
+                             width=90),
+                 TableColumn(field='born_volume', title='born volume', formatter=NumberFormatter(format='0.0%'),
+                             width=85)]
     for c in chains:
         tab[f'frac_{c}'] = [float(np.mean(chain_id[labels == cl] == c)) for cl in ids]
         cols.append(TableColumn(field=f'frac_{c}', title=f'{c}', formatter=NumberFormatter(format='0.00')))
@@ -416,7 +486,7 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
         for c in [c for c in ('high', 'lens', 'dyke', 'pipe') if c in truth]:
             tab[f'P_{c}'] = [float(np.mean(truth[c].values[labels == cl].astype(bool))) for cl in ids]
             cols.append(TableColumn(field=f'P_{c}', title=f'P({c})', formatter=NumberFormatter(format='0.00')))
-    wide = has_m or topology is not None or extra is not None
+    wide = has_m or topology is not None or extra is not None or has_u
     if has_m:
         for j, m in enumerate(mnames):
             tab[f'E_{j}'] = Em[:, j]
@@ -450,10 +520,11 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
         where = {'y': f'vertical section at y = {iy}', 'x': f'vertical section at x = {ix}',
                  'z': f'depth map at z = {iz}'}[thumb_orient]
         text = guide if isinstance(guide, str) else _guide_html(
-            where, len(with_thumb) < N, chain_id is not None and len(chains) > 1, has_m)
+            where, len(with_thumb) < N, chain_id is not None and len(chains) > 1, has_m, has_u)
         guide_div = [Div(text=text, width=640, styles={'margin-top': '10px'})]
     right = column(row(select, orient), info_div,
-                   *[row(panels[o]['med'], panels[o]['std'], panels[o]['rep']) for o, _ in _ORIENTS], *guide_div)
+                   *[row(panels[o]['med'], panels[o]['std'], panels[o]['rep']) for o, _ in _ORIENTS],
+                   *([row(panels[o]['ent'], panels[o]['born']) for o, _ in _ORIENTS] if has_u else []), *guide_div)
     left = ([row(cby, legend_div)] if cby is not None else []) + [p_emb] + ([p_hm] if p_hm is not None else []) \
         + ([table] if with_table else [])
     top = [header]
@@ -461,7 +532,7 @@ def build_viewer(core, coords, labels, chain_id=None, iy=None, ix=None, iz=None,
 
     # initial state: first cluster, y section
     k0 = 0
-    for s in ('med', 'std', 'rep'):
+    for s in keys:
         img_srcs[orient0][s].data = dict(image=[stats[f'{s}_{orient0}'][k0]])
     sc_src.selected.indices = stats['members'][k0]
     if has_m:
